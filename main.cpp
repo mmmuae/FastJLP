@@ -22,14 +22,38 @@
 #ifdef WITHGPU
 #include "GPU/BackendFactory.h"
 #endif
+#include <algorithm>
+#include <array>
+#include <cerrno>
+#include <cctype>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <string>
-#include <string.h>
 #include <stdexcept>
+#include <vector>
+
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 using namespace std;
 
 #define CHECKARG(opt,n) if(a>=argc-1) {::printf(opt " missing argument #%d\n",n);exit(0);} else {a++;}
+
+static bool is_hex_string(const std::string &s);
+static bool is_pubkey_hex(const std::string &s);
+static bool dec_to_u256(const std::string &dec, std::array<uint64_t,4> &out_le);
+static std::string u256_to_hex64_be(const std::array<uint64_t,4> &v_le);
+static bool hex_to_u256(const std::string &hex, std::array<uint64_t,4> &out_le, std::string &out_hex64);
+static int  safe_write_all(int fd, const void *buf, size_t len);
+static std::string make_ephemeral_config(const std::string &start_hex64,
+                                         const std::string &end_hex64,
+                                         const std::string &pubkey_hex,
+                                         std::string &tmp_path_out);
+static void cleanup_cli_config();
 
 // ------------------------------------------------------------------------------------------
 
@@ -67,6 +91,8 @@ void printUsage() {
   printf(" -o fileName: output result to fileName\n");
   printf(" -l: List cuda enabled devices\n");
   printf(" -check: Check GPU kernel vs CPU\n");
+  printf(" --start-dec/--end-dec/--pubkey: Provide decimal bounds + pubkey via CLI (temp config)\n");
+  printf(" --start-hex/--end-hex/--pubkey: Provide hex bounds + pubkey via CLI (temp config)\n");
   printf(" inFile: intput configuration file\n");
   exit(0);
 
@@ -169,6 +195,15 @@ static bool serverMode = false;
 static string serverIP = "";
 static string outputFile = "";
 static bool splitWorkFile = false;
+
+static string cli_start_dec;
+static string cli_end_dec;
+static string cli_start_hex;
+static string cli_end_hex;
+static string cli_pubkey_hex;
+
+static string cli_temp_config_path;
+static bool cli_cleanup_registered = false;
 
 #ifdef WITHGPU
 BackendKind gRequestedBackend = GetDefaultBackend();
@@ -343,6 +378,28 @@ int main(int argc, char* argv[]) {
       printf("--gpu-backend unsupported: GPU code not compiled\n");
       exit(-1);
 #endif
+    } else if(strcmp(argv[a],"--start-dec") == 0) {
+      CHECKARG("--start-dec",1);
+      cli_start_dec = string(argv[a]);
+      a++;
+    } else if(strcmp(argv[a],"--end-dec") == 0) {
+      CHECKARG("--end-dec",1);
+      cli_end_dec = string(argv[a]);
+      a++;
+    } else if(strcmp(argv[a],"--start-hex") == 0) {
+      CHECKARG("--start-hex",1);
+      cli_start_hex = string(argv[a]);
+      a++;
+    } else if(strcmp(argv[a],"--end-hex") == 0) {
+      CHECKARG("--end-hex",1);
+      cli_end_hex = string(argv[a]);
+      a++;
+    } else if(strcmp(argv[a],"--pubkey") == 0) {
+      CHECKARG("--pubkey",1);
+      cli_pubkey_hex = string(argv[a]);
+      std::transform(cli_pubkey_hex.begin(), cli_pubkey_hex.end(), cli_pubkey_hex.begin(),
+                     [](unsigned char c){ return static_cast<char>(std::toupper(c)); });
+      a++;
     } else if(strcmp(argv[a],"-v") == 0) {
       ::exit(0);
     } else if(strcmp(argv[a],"-check") == 0) {
@@ -358,6 +415,98 @@ int main(int argc, char* argv[]) {
 
   }
 
+  bool using_cli_config = false;
+  if(!cli_start_dec.empty() || !cli_end_dec.empty() ||
+     !cli_start_hex.empty() || !cli_end_hex.empty() ||
+     !cli_pubkey_hex.empty()) {
+    const bool have_dec = (!cli_start_dec.empty() || !cli_end_dec.empty());
+    const bool have_hex = (!cli_start_hex.empty() || !cli_end_hex.empty());
+    if(have_dec && have_hex) {
+      printf("Error: do not mix decimal and hexadecimal CLI ranges\n");
+      exit(-1);
+    }
+    if(!have_dec && !have_hex) {
+      printf("Error: missing CLI range\n");
+      exit(-1);
+    }
+    if(cli_pubkey_hex.empty()) {
+      printf("Error: --pubkey HEX is required with CLI range input\n");
+      exit(-1);
+    }
+    if(!is_pubkey_hex(cli_pubkey_hex)) {
+      printf("Error: --pubkey must be a valid compressed/uncompressed hex key\n");
+      exit(-1);
+    }
+
+    std::string start_hex64;
+    std::string end_hex64;
+    if(have_dec) {
+      std::array<uint64_t,4> start_le = {0,0,0,0};
+      std::array<uint64_t,4> end_le = {0,0,0,0};
+      if(cli_start_dec.empty() || cli_end_dec.empty()) {
+        printf("Error: --start-dec and --end-dec required together\n");
+        exit(-1);
+      }
+      if(!dec_to_u256(cli_start_dec, start_le)) {
+        printf("Error: invalid --start-dec value\n");
+        exit(-1);
+      }
+      if(!dec_to_u256(cli_end_dec, end_le)) {
+        printf("Error: invalid --end-dec value\n");
+        exit(-1);
+      }
+      bool ok = true;
+      for(int i = 3; i >= 0; --i) {
+        if(start_le[i] > end_le[i]) { ok = false; break; }
+        if(start_le[i] < end_le[i]) { break; }
+      }
+      if(!ok) {
+        printf("Error: start-dec must be <= end-dec\n");
+        exit(-1);
+      }
+      start_hex64 = u256_to_hex64_be(start_le);
+      end_hex64   = u256_to_hex64_be(end_le);
+    } else {
+      std::array<uint64_t,4> start_le = {0,0,0,0};
+      std::array<uint64_t,4> end_le = {0,0,0,0};
+      if(cli_start_hex.empty() || cli_end_hex.empty()) {
+        printf("Error: --start-hex and --end-hex required together\n");
+        exit(-1);
+      }
+      if(!hex_to_u256(cli_start_hex, start_le, start_hex64)) {
+        printf("Error: invalid --start-hex value\n");
+        exit(-1);
+      }
+      if(!hex_to_u256(cli_end_hex, end_le, end_hex64)) {
+        printf("Error: invalid --end-hex value\n");
+        exit(-1);
+      }
+      bool ok = true;
+      for(int i = 3; i >= 0; --i) {
+        if(start_le[i] > end_le[i]) { ok = false; break; }
+        if(start_le[i] < end_le[i]) { break; }
+      }
+      if(!ok) {
+        printf("Error: start-hex must be <= end-hex\n");
+        exit(-1);
+      }
+    }
+
+    std::string tmp_path;
+    std::string cfg = make_ephemeral_config(start_hex64, end_hex64, cli_pubkey_hex, tmp_path);
+    if(cfg.empty()) {
+      printf("Error: failed to create temporary config\n");
+      exit(-1);
+    }
+    configFile = cfg;
+    cli_temp_config_path = tmp_path;
+    using_cli_config = true;
+    if(!cli_cleanup_registered) {
+      atexit(cleanup_cli_config);
+      cli_cleanup_registered = true;
+    }
+  }
+
   if(gridSize.size() == 0) {
     for(size_t i = 0; i < gpuId.size(); i++) {
       gridSize.push_back(0);
@@ -371,7 +520,7 @@ int main(int argc, char* argv[]) {
   Kangaroo *v = new Kangaroo(secp,dp,gpuEnable,workFile,iWorkFile,savePeriod,saveKangaroo,saveKangarooByServer,
                              maxStep,wtimeout,port,ntimeout,serverIP,outputFile,splitWorkFile);
   if(checkFlag) {
-    v->Check(gpuId,gridSize);  
+    v->Check(gpuId,gridSize);
     exit(0);
   } else {
     if(checkWorkFile.length() > 0) {
@@ -404,6 +553,164 @@ int main(int argc, char* argv[]) {
       v->Run(nbCPUThread,gpuId,gridSize);
   }
 
+  if(using_cli_config) {
+    cleanup_cli_config();
+  }
+
   return 0;
 
+}
+
+static bool is_hex_string(const std::string &s) {
+  if(s.empty()) {
+    return false;
+  }
+  for(unsigned char c : s) {
+    if(!std::isxdigit(c)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool is_pubkey_hex(const std::string &s) {
+  if(!(s.size() == 66 || s.size() == 130)) {
+    return false;
+  }
+  if(!is_hex_string(s)) {
+    return false;
+  }
+  if(!(s.rfind("02",0) == 0 || s.rfind("03",0) == 0 || s.rfind("04",0) == 0)) {
+    return false;
+  }
+  return true;
+}
+
+static bool dec_to_u256(const std::string &dec, std::array<uint64_t,4> &out_le) {
+  out_le = {0,0,0,0};
+  if(dec.empty()) {
+    return false;
+  }
+  for(unsigned char c : dec) {
+    if(c < '0' || c > '9') {
+      return false;
+    }
+    unsigned int digit = static_cast<unsigned int>(c - '0');
+    unsigned __int128 carry = digit;
+    for(int i = 0; i < 4; ++i) {
+      unsigned __int128 cur = static_cast<unsigned __int128>(out_le[i]) * 10u + carry;
+      out_le[i] = static_cast<uint64_t>(cur);
+      carry = (cur >> 64);
+    }
+    if(carry != 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static std::string u256_to_hex64_be(const std::array<uint64_t,4> &v_le) {
+  char buf[16 * 4 + 1] = {0};
+  std::snprintf(buf, sizeof(buf), "%016llX%016llX%016llX%016llX",
+                static_cast<unsigned long long>(v_le[3]),
+                static_cast<unsigned long long>(v_le[2]),
+                static_cast<unsigned long long>(v_le[1]),
+                static_cast<unsigned long long>(v_le[0]));
+  return std::string(buf);
+}
+
+static bool hex_to_u256(const std::string &hex, std::array<uint64_t,4> &out_le, std::string &out_hex64) {
+  if(hex.empty()) {
+    return false;
+  }
+  std::string h = hex;
+  if(h.size() >= 2 && h[0] == '0' && (h[1] == 'x' || h[1] == 'X')) {
+    h = h.substr(2);
+  }
+  if(h.empty() || h.size() > 64) {
+    return false;
+  }
+  if(!is_hex_string(h)) {
+    return false;
+  }
+  if(h.size() < 64) {
+    h = std::string(64 - h.size(), '0') + h;
+  }
+  std::transform(h.begin(), h.end(), h.begin(), [](unsigned char c) {
+    return static_cast<char>(std::toupper(c));
+  });
+  out_le = {0,0,0,0};
+  for(int limb = 0; limb < 4; ++limb) {
+    std::string part = h.substr(limb * 16, 16);
+    char *endp = nullptr;
+    unsigned long long val = std::strtoull(part.c_str(), &endp, 16);
+    if(endp == nullptr || *endp != '\0') {
+      return false;
+    }
+    out_le[3 - limb] = static_cast<uint64_t>(val);
+  }
+  out_hex64 = h;
+  return true;
+}
+
+static int safe_write_all(int fd, const void *buf, size_t len) {
+#ifndef _WIN32
+  const unsigned char *ptr = static_cast<const unsigned char *>(buf);
+  size_t written = 0;
+  while(written < len) {
+    ssize_t res = ::write(fd, ptr + written, len - written);
+    if(res < 0) {
+      if(errno == EINTR) {
+        continue;
+      }
+      return -1;
+    }
+    written += static_cast<size_t>(res);
+  }
+  return 0;
+#else
+  (void)fd; (void)buf; (void)len;
+  errno = ENOSYS;
+  return -1;
+#endif
+}
+
+static std::string make_ephemeral_config(const std::string &start_hex64,
+                                         const std::string &end_hex64,
+                                         const std::string &pubkey_hex,
+                                         std::string &tmp_path_out) {
+#ifndef _WIN32
+  char tmpl[] = "/tmp/kang_cfg_XXXXXX";
+  int fd = ::mkstemp(tmpl);
+  if(fd == -1) {
+    perror("mkstemp");
+    return std::string();
+  }
+  std::string content;
+  content.reserve(64 + 1 + 64 + 1 + pubkey_hex.size() + 1);
+  content.append(start_hex64).append("\n");
+  content.append(end_hex64).append("\n");
+  content.append(pubkey_hex).append("\n");
+  if(safe_write_all(fd, content.data(), content.size()) != 0) {
+    perror("write");
+    ::close(fd);
+    ::unlink(tmpl);
+    return std::string();
+  }
+  ::close(fd);
+  tmp_path_out.assign(tmpl);
+  return std::string(tmpl);
+#else
+  (void)start_hex64; (void)end_hex64; (void)pubkey_hex; (void)tmp_path_out;
+  return std::string();
+#endif
+}
+
+static void cleanup_cli_config() {
+#ifndef _WIN32
+  if(!cli_temp_config_path.empty()) {
+    ::unlink(cli_temp_config_path.c_str());
+    cli_temp_config_path.clear();
+  }
+#endif
 }
