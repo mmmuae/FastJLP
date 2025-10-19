@@ -4,11 +4,8 @@
 
 #ifdef __APPLE__
 #define Point OSXPoint
-#endif
-#include <Metal/Metal.h>
-#ifdef __APPLE__
+#import <Metal/Metal.h>
 #undef Point
-#endif
 #include "../GPU/GPUEngine.h"
 #include "../GPU/metal/MetalBackend.hpp"
 
