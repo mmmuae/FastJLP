@@ -854,6 +854,7 @@ __device__ __noinline__ void _ModInv(GPU_U64_PTR R) {
 __device__ void _ModMult(GPU_U64_PTR r,GPU_U64_PTR a,GPU_U64_PTR b) {
   uint64_t r512[8];
   uint64_t t[NBBLOCK];
+  uint64_t ah, al;
 
   r512[5] = r512[6] = r512[7] = 0ULL;
 
@@ -889,15 +890,7 @@ __device__ void _ModMult(GPU_U64_PTR r,GPU_U64_PTR a,GPU_U64_PTR b) {
     UADD1(r512[3],t[3]);
   }
 
-  UMult(t, a, b[2]); {
-    UADDO1(r512[2], t[0]);
-    UADDC1(r512[3], t[1]);
-    UADDC1(r512[4], t[2]);
-    UADDC1(r512[5], t[3]);
-    UADD1 (r512[6], t[4]);
-  }
-
-  // Reduce from 320 to 256 
+  // Reduce from 320 to 256
   { UADDO1(t[4],0ULL); UADD1(t[4],0ULL); } // tiny scoped chain to init t[4]
   UMULLO(al,t[4],0x1000003D1ULL);
   UMULHI(ah,t[4],0x1000003D1ULL);
@@ -905,39 +898,14 @@ __device__ void _ModMult(GPU_U64_PTR r,GPU_U64_PTR a,GPU_U64_PTR b) {
     UADDC(r[1],r512[1],ah);
     UADDC(r[2],r512[2],0ULL);
     UADD(r[3],r512[3],0ULL); }
-
-  // Reduce from 320 to 256
-  { UADDO1(t[4], 0ULL); UADD1(t[4], 0ULL); } // start+end a tiny chain to define carry
-
-  uint64_t ah, al;
-  UMULLO(al, t[4], 0x1000003D1ULL);
-  UMULHI(ah, t[4], 0x1000003D1ULL);
-  { UADDO(r[0], r512[0], al);
-    UADDC(r[1], r512[1], ah);
-    UADDC(r[2], r512[2], 0ULL);
-    UADD (r[3], r512[3], 0ULL);
-  }
 }
 
 
 __device__ void _ModMult(GPU_U64_PTR r,GPU_U64_PTR a) {
-  uint64_t r512[8], t[NBBLOCK];
-
-  r512[5] = r512[6] = r512[7] = 0ULL;
-
-  // 256*256 multiplier (each carry-chain is self-contained)
-  UMult(r512, a, r[0]);
-  UMult(t,    a, r[1]); {
-    UADDO1(r512[1], t[0]);
-    UADDC1(r512[2], t[1]);
-    UADDC1(r512[3], t[2]);
-    UADDC1(r512[4], t[3]);
-    UADD1 (r512[5], t[4]);
-  }
-
   uint64_t r512[8];
   uint64_t t[NBBLOCK];
-  uint64_t ah,al;
+  uint64_t ah, al;
+
   r512[5] = r512[6] = r512[7] = 0ULL;
 
   // 256*256 multiplier
@@ -980,18 +948,6 @@ __device__ void _ModMult(GPU_U64_PTR r,GPU_U64_PTR a) {
     UADDC(r[1],r512[1],ah);
     UADDC(r[2],r512[2],0ULL);
     UADD(r[3],r512[3],0ULL); }
-
-  // Reduce from 320 to 256
-  { UADDO1(t[4], 0ULL); UADD1(t[4], 0ULL); } // define+close tiny chain
-
-  uint64_t ah, al;
-  UMULLO(al, t[4], 0x1000003D1ULL);
-  UMULHI(ah, t[4], 0x1000003D1ULL);
-  { UADDO(r[0], r512[0], al);
-    UADDC(r[1], r512[1], ah);
-    UADDC(r[2], r512[2], 0ULL);
-    UADD (r[3], r512[3], 0ULL);
-  }
 }
 
 __device__ void _ModSqr(GPU_U64_PTR rp,GPU_CONST_U64_PTR up) {
