@@ -3,7 +3,12 @@
 #include <vector>
 
 #ifdef __APPLE__
+#define Point OSXPoint
+#endif
 #include <Metal/Metal.h>
+#ifdef __APPLE__
+#undef Point
+#endif
 #include "../GPU/GPUEngine.h"
 #include "../GPU/metal/MetalBackend.hpp"
 
