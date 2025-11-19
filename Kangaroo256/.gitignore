@@ -8,8 +8,12 @@ vc140.pdb
 x64/
 obj/
 .idea/
-kangaroo
+build/
 cmake-build-debug/
+install/
+kangaroo
 *.prf
-
-DOC/*.jpg
+input-*
+deviceQuery/deviceQuery
+deviceQuery/*.o
+deviceQuery/bin/
