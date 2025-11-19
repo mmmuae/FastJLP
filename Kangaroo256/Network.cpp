@@ -745,7 +745,7 @@ void Kangaroo::RunServer() {
   soc_addr.sin_port = htons(port);
   soc_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
-  if(bind(serverSock,(struct sockaddr*)&soc_addr,sizeof(soc_addr))) {
+  if(::bind(serverSock,(struct sockaddr*)&soc_addr,sizeof(soc_addr))) {
     ::printf("Error: Can not bind socket. Another server running?\n%s\n",GetNetworkError().c_str());
     exit(-1);
   }
