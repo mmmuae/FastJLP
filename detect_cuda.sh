@@ -111,10 +111,15 @@ from_gpu_name() {
         ["NVIDIA GeForce RTX 4090 D"]="89"
         ["NVIDIA GeForce RTX 4090D"]="89"
         ["NVIDIA GeForce RTX 4080"]="89"
-        ["NVIDIA GeForce RTX 5090"]="90"
-        ["NVIDIA GeForce RTX 5080"]="90"
         ["NVIDIA H100"]="90"
         ["NVIDIA H200"]="90"
+        ["NVIDIA B100"]="120"
+        ["NVIDIA B200"]="120"
+        ["NVIDIA Blackwell B100"]="120"
+        ["NVIDIA Blackwell B200"]="120"
+        ["NVIDIA GeForce RTX 5090"]="100"
+        ["NVIDIA GeForce RTX 5090 Ti"]="100"
+        ["NVIDIA GeForce RTX 5080"]="100"
     )
 
     local -a rows=()
@@ -133,6 +138,15 @@ from_gpu_name() {
         name="${name%% }"
         [[ -z "$idx" || -z "$name" ]] && continue
         local mapped="${name_map[$name]:-}"
+        if [[ -z "$mapped" ]]; then
+            if [[ "$name" =~ RTX[[:space:]]50[0-9]{2} ]]; then
+                mapped="100"
+            elif [[ "$name" =~ H[12]00 ]]; then
+                mapped="90"
+            elif [[ "$name" =~ B[12]00 ]]; then
+                mapped="120"
+            fi
+        fi
         [[ -z "$mapped" ]] && continue
         if [[ -n "$visible_index" && "$idx" == "$visible_index" ]]; then
             chosen="$mapped"
