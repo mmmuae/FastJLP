@@ -44,20 +44,27 @@ CUDA       = /usr/local/cuda
 CXXCUDA    = /usr/bin/g++
 NVCC       = $(CUDA)/bin/nvcc
 
+ifdef gpu
+ifndef ccap
+ccap != ./detect_cuda.sh
+AUTO_CCAP := 1
+endif
+endif
+
 
 all: driverquery bsgs
 
 ifdef gpu
-ifndef ccap
+ifdef AUTO_CCAP
 driverquery:
-	. ./detect_cuda.sh
-ccap=$(shell cat cuda_version.txt)
+	@echo "Compiling against automatically detected CUDA compute capability ${ccap}"
 else
 driverquery:
 	@echo "Compiling against manually selected CUDA version ${ccap}"
 endif
 else
 driverquery:
+	@true
 endif
 
 
@@ -109,7 +116,7 @@ $(OBJDIR)/GPU: $(OBJDIR)
 	cd $(OBJDIR) && mkdir -p GPU
 
 $(OBJDIR)/SECPK1: $(OBJDIR)
-	cd $(OBJDIR) &&	mkdir -p SECPK1
+	cd $(OBJDIR) && mkdir -p SECPK1
 
 clean:
 	@echo Cleaning...
@@ -117,6 +124,7 @@ clean:
 	@rm -f obj/GPU/*.o
 	@rm -f obj/SECPK1/*.o
 	@rm -f deviceQuery/*.o
+	@rm -f deviceQuery/deviceQuery
 	@rm -f cuda_version.txt
 	@rm -f deviceQuery/cuda_build_log.txt
 
