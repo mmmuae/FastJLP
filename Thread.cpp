@@ -18,6 +18,7 @@
 #include "Kangaroo.h"
 #include "Timer.h"
 #include <string.h>
+#include <cstdio>
 #define _USE_MATH_DEFINES
 #include <math.h>
 #include <algorithm>
@@ -55,6 +56,8 @@ void  Kangaroo::JoinThreads(THREAD_HANDLE *handles, int nbThread) {
     pthread_join(handles[i], NULL);
 }
 void  Kangaroo::FreeHandles(THREAD_HANDLE *handles, int nbThread) {
+  (void)handles;
+  (void)nbThread;
 }
 #endif
 
@@ -131,11 +134,11 @@ string Kangaroo::GetTimeStr(double dTime) {
     double nbYear = nbDay / 365.0;
     if (nbYear > 1) {
       if (nbYear < 5)
-        sprintf(tmp, "%.1fy", nbYear);
+        std::snprintf(tmp, sizeof(tmp), "%.1fy", nbYear);
       else
-        sprintf(tmp, "%gy", nbYear);
+        std::snprintf(tmp, sizeof(tmp), "%gy", nbYear);
     } else {
-      sprintf(tmp, "%.1fd", nbDay);
+      std::snprintf(tmp, sizeof(tmp), "%.1fd", nbDay);
     }
 
   } else {
@@ -147,12 +150,12 @@ string Kangaroo::GetTimeStr(double dTime) {
 
     if (nbHour == 0) {
       if (nbMin == 0) {
-        sprintf(tmp, "%02ds", nbSec);
+        std::snprintf(tmp, sizeof(tmp), "%02ds", nbSec);
       } else {
-        sprintf(tmp, "%02d:%02d", nbMin, nbSec);
+        std::snprintf(tmp, sizeof(tmp), "%02d:%02d", nbMin, nbSec);
       }
     } else {
-      sprintf(tmp, "%02d:%02d:%02d", nbHour, nbMin, nbSec);
+      std::snprintf(tmp, sizeof(tmp), "%02d:%02d:%02d", nbHour, nbMin, nbSec);
     }
 
   }

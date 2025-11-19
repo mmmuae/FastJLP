@@ -97,7 +97,6 @@ bool Kangaroo::ParseConfigFile(std::string &fileName) {
 
   // Get lines
   vector<string> lines;
-  int nbLine = 0;
   string line;
   ifstream inFile(fileName);
   while(getline(inFile,line)) {
@@ -111,7 +110,6 @@ bool Kangaroo::ParseConfigFile(std::string &fileName) {
 
     if(line.length() > 0) {
       lines.push_back(line);
-      nbLine++;
     }
 
   }
@@ -518,12 +516,12 @@ void Kangaroo::SolveKeyCPU(TH_PARAM *ph) {
 
 void Kangaroo::SolveKeyGPU(TH_PARAM *ph) {
 
+#ifdef WITHGPU
+
   double lastSent = 0;
 
   // Global init
   int thId = ph->threadId;
-
-#ifdef WITHGPU
 
   vector<ITEM> dps;
   vector<ITEM> gpuFound;
@@ -692,7 +690,7 @@ void Kangaroo::CreateHerd(int nbKangaroo,Int *px,Int *py,Int *d,int firstType,bo
   // Choose random starting distance
   if(lock) LOCK(ghMutex);
 
-  for(uint64_t j = 0; j<nbKangaroo; j++) {
+  for(int j = 0; j<nbKangaroo; j++) {
 
 #ifdef USE_SYMMETRY
 
@@ -723,7 +721,7 @@ void Kangaroo::CreateHerd(int nbKangaroo,Int *px,Int *py,Int *d,int firstType,bo
   // Compute starting pos
   S = secp->ComputePublicKeys(pk);
 
-  for(uint64_t j = 0; j<nbKangaroo; j++) {
+  for(int j = 0; j<nbKangaroo; j++) {
     if((j + firstType) % 2 == TAME) {
       Sp.push_back(Z);
     } else {
@@ -733,7 +731,7 @@ void Kangaroo::CreateHerd(int nbKangaroo,Int *px,Int *py,Int *d,int firstType,bo
 
   S = secp->AddDirect(Sp,S);
 
-  for(uint64_t j = 0; j<nbKangaroo; j++) {
+  for(int j = 0; j<nbKangaroo; j++) {
 
     px[j].Set(&S[j].x);
     py[j].Set(&S[j].y);
@@ -935,6 +933,7 @@ void Kangaroo::Run(int nbThread,std::vector<int> gpuId,std::vector<int> gridSize
     ::printf("GPU code not compiled, use -DWITHGPU when compiling.\n");
     nbGPUThread = 0;
   }
+  (void)gridSize;
 
 #endif
 

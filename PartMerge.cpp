@@ -20,6 +20,7 @@
 #include "SECPK1/IntGroup.h"
 #include "Timer.h"
 #include <string.h>
+#include <cstdio>
 #define _USE_MATH_DEFINES
 #include <math.h>
 #include <algorithm>
@@ -32,20 +33,33 @@
 
 using namespace std;
 
+namespace {
+inline void SafeClose(FILE*& file) {
+  if (file != NULL) {
+    fclose(file);
+    file = NULL;
+  }
+}
+
+inline bool ReadExact(FILE* file, void* data, size_t size) {
+  return ::fread(data,1,size,file) == size;
+}
+}
+
 string Kangaroo::GetPartName(std::string& partName,int i,bool tmpPart) {
 
   char tmp[256];
   if(tmpPart)
-    sprintf(tmp,"part%03d.tmp",i);
+    ::snprintf(tmp,sizeof(tmp),"part%03d.tmp",i);
   else
-    sprintf(tmp,"part%03d",i);
+    ::snprintf(tmp,sizeof(tmp),"part%03d",i);
   string pName = partName + "/" + string(tmp);
 
   return pName;
 
 }
 
-FILE * Kangaroo::OpenPart(std::string& partName,char *mode,int i,bool tmpPart) {
+FILE * Kangaroo::OpenPart(std::string& partName,const char *mode,int i,bool tmpPart) {
 
   string fName = GetPartName(partName,i,tmpPart);
   FILE* f = fopen(fName.c_str(),mode);
@@ -166,7 +180,7 @@ bool Kangaroo::MergePartition(TH_PARAM* p) {
   }
 
   ::fclose(f1);
-  ::fclose(f2);
+  SafeClose(f2);
   ::fclose(f);
 
   // Rename
@@ -233,13 +247,17 @@ bool Kangaroo::MergeWorkPartPart(std::string& part1Name,std::string& part2Name) 
       return false;
 
     // Read global param
-    ::fread(&dp1,sizeof(uint32_t),1,f1);
-    ::fread(&RS1.bits64,32,1,f1); RS1.bits64[4] = 0;
-    ::fread(&RE1.bits64,32,1,f1); RE1.bits64[4] = 0;
-    ::fread(&k1.x.bits64,32,1,f1); k1.x.bits64[4] = 0;
-    ::fread(&k1.y.bits64,32,1,f1); k1.y.bits64[4] = 0;
-    ::fread(&count1,sizeof(uint64_t),1,f1);
-    ::fread(&time1,sizeof(double),1,f1);
+    if(!ReadExact(f1,&dp1,sizeof(uint32_t)) ||
+       !ReadExact(f1,&RS1.bits64,32) ||
+       !ReadExact(f1,&RE1.bits64,32) ||
+       !ReadExact(f1,&k1.x.bits64,32) ||
+       !ReadExact(f1,&k1.y.bits64,32) ||
+       !ReadExact(f1,&count1,sizeof(uint64_t)) ||
+       !ReadExact(f1,&time1,sizeof(double))) {
+      ::printf("MergeWorkPartPart: failed to read %s\n",file1.c_str());
+      ::fclose(f1);
+      return true;
+    }
 
     k1.z.SetInt32(1);
     if(!secp->EC(k1)) {
@@ -266,18 +284,22 @@ bool Kangaroo::MergeWorkPartPart(std::string& part1Name,std::string& part2Name) 
   Int RE2;
 
   // Read global param
-  ::fread(&dp2,sizeof(uint32_t),1,f2);
-  ::fread(&RS2.bits64,32,1,f2); RS2.bits64[4] = 0;
-  ::fread(&RE2.bits64,32,1,f2); RE2.bits64[4] = 0;
-  ::fread(&k2.x.bits64,32,1,f2); k2.x.bits64[4] = 0;
-  ::fread(&k2.y.bits64,32,1,f2); k2.y.bits64[4] = 0;
-  ::fread(&count2,sizeof(uint64_t),1,f2);
-  ::fread(&time2,sizeof(double),1,f2);
+  if(!ReadExact(f2,&dp2,sizeof(uint32_t)) ||
+     !ReadExact(f2,&RS2.bits64,32) ||
+     !ReadExact(f2,&RE2.bits64,32) ||
+     !ReadExact(f2,&k2.x.bits64,32) ||
+     !ReadExact(f2,&k2.y.bits64,32) ||
+     !ReadExact(f2,&count2,sizeof(uint64_t)) ||
+     !ReadExact(f2,&time2,sizeof(double))) {
+    ::printf("MergeWorkPart: failed to read %s\n",file2.c_str());
+    SafeClose(f2);
+    return true;
+  }
 
   k2.z.SetInt32(1);
   if(!secp->EC(k2)) {
     ::printf("MergeWorkPartPart: key2 does not lie on elliptic curve\n");
-    ::fclose(f2);
+    SafeClose(f2);
     return true;
   }
 
@@ -285,7 +307,7 @@ bool Kangaroo::MergeWorkPartPart(std::string& part1Name,std::string& part2Name) 
 
     if(v1 != v2) {
       ::printf("MergeWorkPartPart: cannot merge workfile of different version\n");
-      ::fclose(f2);
+      SafeClose(f2);
       return true;
     }
 
@@ -296,7 +318,7 @@ bool Kangaroo::MergeWorkPartPart(std::string& part1Name,std::string& part2Name) 
       ::printf("RE1: %s\n",RE1.GetBase16().c_str());
       ::printf("RS2: %s\n",RS2.GetBase16().c_str());
       ::printf("RE2: %s\n",RE2.GetBase16().c_str());
-      ::fclose(f2);
+      SafeClose(f2);
       return true;
 
     }
@@ -304,7 +326,7 @@ bool Kangaroo::MergeWorkPartPart(std::string& part1Name,std::string& part2Name) 
     if(!k1.equals(k2)) {
 
       ::printf("MergeWorkPartPart: key differs, multiple keys not yet supported\n");
-      ::fclose(f2);
+      SafeClose(f2);
       return true;
 
     }
@@ -319,7 +341,7 @@ bool Kangaroo::MergeWorkPartPart(std::string& part1Name,std::string& part2Name) 
     RE1.Set(&RE2);
 
   }
-  fclose(f2);
+  SafeClose(f2);
 
   ::printf("%s: [DP%d]\n",part1Name.c_str(),dp1);
   ::printf("%s: [DP%d]\n",part2Name.c_str(),dp2);
@@ -340,12 +362,12 @@ bool Kangaroo::MergeWorkPartPart(std::string& part1Name,std::string& part2Name) 
   if(f == NULL) {
     ::printf("MergeWorkPart: Cannot open %s for writing\n",file1.c_str());
     ::printf("%s\n",::strerror(errno));
-    fclose(f2);
+    SafeClose(f2);
     return true;
   }
   dpSize = (dp1 < dp2) ? dp1 : dp2;
   if(!SaveHeader(file1,f,HEADW,count1 + count2,time1 + time2)) {
-    fclose(f2);
+    SafeClose(f2);
     return true;
   }
   fclose(f);
@@ -427,6 +449,8 @@ bool Kangaroo::MergeWorkPartPart(std::string& part1Name,std::string& part2Name) 
 
 bool Kangaroo::FillEmptyPartFromFile(std::string& partName,std::string& fileName,bool printStat) {
 
+  (void)printStat;
+
   double t0;
   double t1;
   uint32_t v1;
@@ -445,13 +469,17 @@ bool Kangaroo::FillEmptyPartFromFile(std::string& partName,std::string& fileName
     return true;
 
   // Read global param
-  ::fread(&dp1,sizeof(uint32_t),1,f1);
-  ::fread(&RS1.bits64,32,1,f1); RS1.bits64[4] = 0;
-  ::fread(&RE1.bits64,32,1,f1); RE1.bits64[4] = 0;
-  ::fread(&k1.x.bits64,32,1,f1); k1.x.bits64[4] = 0;
-  ::fread(&k1.y.bits64,32,1,f1); k1.y.bits64[4] = 0;
-  ::fread(&count1,sizeof(uint64_t),1,f1);
-  ::fread(&time1,sizeof(double),1,f1);
+  if(!ReadExact(f1,&dp1,sizeof(uint32_t)) ||
+     !ReadExact(f1,&RS1.bits64,32) ||
+     !ReadExact(f1,&RE1.bits64,32) ||
+     !ReadExact(f1,&k1.x.bits64,32) ||
+     !ReadExact(f1,&k1.y.bits64,32) ||
+     !ReadExact(f1,&count1,sizeof(uint64_t)) ||
+     !ReadExact(f1,&time1,sizeof(double))) {
+    ::printf("MergeWorkPart: failed to read %s\n",fileName.c_str());
+    ::fclose(f1);
+    return true;
+  }
 
   k1.z.SetInt32(1);
   if(!secp->EC(k1)) {
@@ -503,12 +531,22 @@ bool Kangaroo::FillEmptyPartFromFile(std::string& partName,std::string& fileName
     unsigned char buff[32];
 
     for(uint32_t h= hStart;h<hStop;h++) {
-      ::fread(&nbItem,sizeof(uint32_t),1,f1);
-      ::fread(&maxItem,sizeof(uint32_t),1,f1);
+      if(!ReadExact(f1,&nbItem,sizeof(uint32_t)) ||
+         !ReadExact(f1,&maxItem,sizeof(uint32_t))) {
+        ::printf("FillEmptyPartFromFile: failed to read part metadata\n");
+        ::fclose(f1);
+        ::fclose(f);
+        return true;
+      }
       ::fwrite(&nbItem,sizeof(uint32_t),1,f);
       ::fwrite(&maxItem,sizeof(uint32_t),1,f);
       for(uint32_t i=0;i<nbItem;i++) {
-        ::fread(&buff,32,1,f1);
+        if(!ReadExact(f1,&buff,32)) {
+          ::printf("FillEmptyPartFromFile: failed to read part data\n");
+          ::fclose(f1);
+          ::fclose(f);
+          return true;
+        }
         ::fwrite(&buff,32,1,f);
       }
       nbDP += nbItem;
@@ -557,13 +595,17 @@ bool Kangaroo::MergeWorkPart(std::string& partName,std::string& file2,bool print
     return true;
 
   // Read global param
-  ::fread(&dp1,sizeof(uint32_t),1,f1);
-  ::fread(&RS1.bits64,32,1,f1); RS1.bits64[4] = 0;
-  ::fread(&RE1.bits64,32,1,f1); RE1.bits64[4] = 0;
-  ::fread(&k1.x.bits64,32,1,f1); k1.x.bits64[4] = 0;
-  ::fread(&k1.y.bits64,32,1,f1); k1.y.bits64[4] = 0;
-  ::fread(&count1,sizeof(uint64_t),1,f1);
-  ::fread(&time1,sizeof(double),1,f1);
+  if(!ReadExact(f1,&dp1,sizeof(uint32_t)) ||
+     !ReadExact(f1,&RS1.bits64,32) ||
+     !ReadExact(f1,&RE1.bits64,32) ||
+     !ReadExact(f1,&k1.x.bits64,32) ||
+     !ReadExact(f1,&k1.y.bits64,32) ||
+     !ReadExact(f1,&count1,sizeof(uint64_t)) ||
+     !ReadExact(f1,&time1,sizeof(double))) {
+    ::printf("MergeWorkPart: failed to read %s\n",file1.c_str());
+    ::fclose(f1);
+    return true;
+  }
 
   k1.z.SetInt32(1);
   if(!secp->EC(k1)) {
@@ -588,24 +630,28 @@ bool Kangaroo::MergeWorkPart(std::string& partName,std::string& file2,bool print
   Int RE2;
 
   // Read global param
-  ::fread(&dp2,sizeof(uint32_t),1,f2);
-  ::fread(&RS2.bits64,32,1,f2); RS2.bits64[4] = 0;
-  ::fread(&RE2.bits64,32,1,f2); RE2.bits64[4] = 0;
-  ::fread(&k2.x.bits64,32,1,f2); k2.x.bits64[4] = 0;
-  ::fread(&k2.y.bits64,32,1,f2); k2.y.bits64[4] = 0;
-  ::fread(&count2,sizeof(uint64_t),1,f2);
-  ::fread(&time2,sizeof(double),1,f2);
+  if(!ReadExact(f2,&dp2,sizeof(uint32_t)) ||
+     !ReadExact(f2,&RS2.bits64,32) ||
+     !ReadExact(f2,&RE2.bits64,32) ||
+     !ReadExact(f2,&k2.x.bits64,32) ||
+     !ReadExact(f2,&k2.y.bits64,32) ||
+     !ReadExact(f2,&count2,sizeof(uint64_t)) ||
+     !ReadExact(f2,&time2,sizeof(double))) {
+    ::printf("MergeWorkPart: failed to read %s\n",file2.c_str());
+    SafeClose(f2);
+    return true;
+  }
 
   k2.z.SetInt32(1);
   if(!secp->EC(k2)) {
     ::printf("MergeWorkPart: key2 does not lie on elliptic curve\n");
-    ::fclose(f2);
+    SafeClose(f2);
     return true;
   }
 
   if(v1 != v2) {
     ::printf("MergeWorkPart: cannot merge workfile of different version\n");
-    ::fclose(f2);
+    SafeClose(f2);
     return true;
   }
 
@@ -616,7 +662,7 @@ bool Kangaroo::MergeWorkPart(std::string& partName,std::string& file2,bool print
     ::printf("RE1: %s\n",RE1.GetBase16().c_str());
     ::printf("RS2: %s\n",RS2.GetBase16().c_str());
     ::printf("RE2: %s\n",RE2.GetBase16().c_str());
-    ::fclose(f2);
+    SafeClose(f2);
     return true;
 
   }
@@ -624,7 +670,7 @@ bool Kangaroo::MergeWorkPart(std::string& partName,std::string& file2,bool print
   if(!k1.equals(k2)) {
 
     ::printf("MergeWorkPart: key differs, multiple keys not yet supported\n");
-    ::fclose(f2);
+    SafeClose(f2);
     return true;
 
   }
@@ -653,12 +699,12 @@ bool Kangaroo::MergeWorkPart(std::string& partName,std::string& file2,bool print
   if(f == NULL) {
     ::printf("MergeWorkPart: Cannot open %s for writing\n",file1.c_str());
     ::printf("%s\n",::strerror(errno));
-    fclose(f2);
+    SafeClose(f2);
     return true;
   }
   dpSize = (dp1 < dp2) ? dp1 : dp2;
   if(!SaveHeader(file1,f,HEADW,count1 + count2,time1 + time2)) {
-    fclose(f2);
+    SafeClose(f2);
     return true;
   }
   fclose(f);
@@ -713,7 +759,7 @@ bool Kangaroo::MergeWorkPart(std::string& partName,std::string& file2,bool print
 
   }
 
-  fclose(f2);
+  SafeClose(f2);
 
   t1 = Timer::get_tick();
 

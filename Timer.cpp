@@ -16,6 +16,7 @@
 */
 
 #include "Timer.h"
+#include <cstdio>
 
 static const char *prefix[] = { "","Kilo","Mega","Giga","Tera","Peta","Hexa" };
 
@@ -129,7 +130,7 @@ std::string Timer::getSeed(int size) {
     printf("Failed to open /dev/urandom %s\n", strerror( errno ));
     exit(1);
   }
-  if( fread(buff,1,size,f)!=size ) {
+  if( fread(buff,1,size,f)!=(size_t)size ) {
     printf("Failed to read from /dev/urandom %s\n", strerror( errno ));
     exit(1);
   }
@@ -138,7 +139,7 @@ std::string Timer::getSeed(int size) {
 #endif
 
   for (int i = 0; i < size; i++) {
-    sprintf(tmp,"%02X",buff[i]);
+    std::snprintf(tmp,sizeof(tmp),"%02X",buff[i]);
     ret.append(tmp);
   }
   
@@ -148,7 +149,7 @@ std::string Timer::getSeed(int size) {
 }
 
 
-std::string Timer::getResult(char *unit, int nbTry, double t0, double t1) {
+std::string Timer::getResult(const char *unit, int nbTry, double t0, double t1) {
 
   char tmp[256];
   int pIdx = 0;
@@ -157,12 +158,12 @@ std::string Timer::getResult(char *unit, int nbTry, double t0, double t1) {
     pIdx++;
     nbCallPerSec = nbCallPerSec / 1000.0;
   }
-  sprintf(tmp, "%.3f %s%s/sec", nbCallPerSec, prefix[pIdx], unit);
+  std::snprintf(tmp, sizeof(tmp), "%.3f %s%s/sec", nbCallPerSec, prefix[pIdx], unit);
   return std::string(tmp);
 
 }
 
-void Timer::printResult(char *unit, int nbTry, double t0, double t1) {
+void Timer::printResult(const char *unit, int nbTry, double t0, double t1) {
 
   printf("%s\n", getResult(unit, nbTry, t0, t1).c_str());
 

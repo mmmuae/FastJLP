@@ -35,6 +35,10 @@
 #include <unistd.h>
 #endif
 
+#if defined(__SIZEOF_INT128__)
+__extension__ typedef unsigned __int128 uint128_ext;
+#endif
+
 using namespace std;
 
 #define CHECKARG(opt,n) if(a>=argc-1) {::printf(opt " missing argument #%d\n",n);exit(0);} else {a++;}
@@ -557,15 +561,19 @@ static bool dec_to_u256(const std::string &dec, std::array<uint64_t,4> &out_le) 
       return false;
     }
     unsigned int digit = static_cast<unsigned int>(c - '0');
-    unsigned __int128 carry = digit;
+#if defined(__SIZEOF_INT128__)
+    uint128_ext carry = digit;
     for(int i = 0; i < 4; ++i) {
-      unsigned __int128 cur = static_cast<unsigned __int128>(out_le[i]) * 10u + carry;
+      uint128_ext cur = static_cast<uint128_ext>(out_le[i]) * 10u + carry;
       out_le[i] = static_cast<uint64_t>(cur);
       carry = (cur >> 64);
     }
     if(carry != 0) {
       return false;
     }
+#else
+#error "dec_to_u256 requires compiler support for __int128"
+#endif
   }
   return true;
 }

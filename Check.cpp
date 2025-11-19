@@ -412,6 +412,9 @@ void Kangaroo::CheckWorkFile(int nbCore,std::string& fileName) {
 
 void Kangaroo::Check(std::vector<int> gpuId,std::vector<int> gridSize) {
 
+  (void)gpuId;
+  (void)gridSize;
+
   Int::Check();
 
   initDPSize = 8;

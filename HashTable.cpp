@@ -106,6 +106,8 @@ void HashTable::Convert(Int *x,Int *d,int256_t *X,int256_t *D) {
 
 int HashTable::MergeH(uint32_t h,FILE* f1,FILE* f2,FILE* fd,uint32_t* nbDP,uint32_t *duplicate,Int* d1,uint32_t* k1,Int* d2,uint32_t* k2) {
 
+  (void)h;
+
   // Merge by line
   // N comparison but avoid slow item allocation
   // return ADD_OK or ADD_COLLISION if a COLLISION is detected
@@ -289,7 +291,7 @@ int HashTable::Add(uint64_t h,ENTRY* e) {
       uint64_t d21 = ent->d.i64[1];
       uint64_t d22 = ent->d.i64[2];
       uint64_t d23 = ent->d.i64[3];
-      if (d10 == d20 && d11 == d21 && d12 == d22 || d13 == d23) {
+      if ((d10 == d20 && d11 == d21 && d12 == d22) || d13 == d23) {
 	// Same point added twice or collision in the same herd!
 	return ADD_DUPLICATE;
       }
@@ -335,7 +337,7 @@ int HashTable::compare(int256_t *i1,int256_t *i2) {
 
 std::string HashTable::GetSizeInfo() {
 
-  char *unit;
+  const char *unit;
   uint64_t totalByte = sizeof(E);
   uint64_t usedByte = HASH_SIZE*2*sizeof(uint32_t);
 
@@ -360,7 +362,7 @@ std::string HashTable::GetSizeInfo() {
   }
 
   char ret[256];
-  sprintf(ret,"%.1f/%.1f%s",usedMB,totalMB,unit);
+  ::snprintf(ret,sizeof(ret),"%.1f/%.1f%s",usedMB,totalMB,unit);
 
   return std::string(ret);
 
@@ -371,7 +373,7 @@ std::string HashTable::GetStr(int256_t *i) {
   std::string ret;
   char tmp[256];
   for(int n=3;n>=0;n--) {
-    ::sprintf(tmp,"%08X",i->i32[n]); 
+    ::snprintf(tmp,sizeof(tmp),"%08X",i->i32[n]); 
     ret += std::string(tmp);
   }
   return ret;

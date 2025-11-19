@@ -18,6 +18,7 @@
 #include "Int.h"
 #include "IntGroup.h"
 #include <string.h>
+#include <cstdio>
 #include <math.h>
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386) || defined(_M_IX86)
 #include <emmintrin.h>
@@ -1204,7 +1205,7 @@ void Int::GCD(Int *a) {
 
 // ------------------------------------------------
 
-void Int::SetBase10(char *value) {  
+void Int::SetBase10(const char *value) {
 
   CLEAR();
   Int pw((uint64_t)1);
@@ -1222,7 +1223,7 @@ void Int::SetBase10(char *value) {
 
 // ------------------------------------------------
 
-void  Int::SetBase16(char *value) {  
+void  Int::SetBase16(const char *value) {
   SetBaseN(16,"0123456789ABCDEF",value);
 }
 
@@ -1241,46 +1242,47 @@ std::string Int::GetBase16() {
 // ------------------------------------------------
 
 std::string Int::GetBlockStr() {
-	
-	char tmp[256];
-	char bStr[256];
-	tmp[0] = 0;
-	for (int i = NB32BLOCK-3; i>=0 ; i--) {
-	  sprintf(bStr, "%08X", bits[i]);
-	  strcat(tmp, bStr);
-	  if(i!=0) strcat(tmp, " ");
-	}
-	return std::string(tmp);
+
+  std::string result;
+  char bStr[16];
+  for (int i = NB32BLOCK - 3; i >= 0; i--) {
+    ::snprintf(bStr, sizeof(bStr), "%08X", bits[i]);
+    result.append(bStr);
+    if (i != 0) {
+      result.push_back(' ');
+    }
+  }
+  return result;
 }
 
 // ------------------------------------------------
 
 std::string Int::GetC64Str(int nbDigit) {
 
-  char tmp[256];
-  char bStr[256];
-  tmp[0] = '{';
-  tmp[1] = 0;
+  std::string tmp("{");
+  char bStr[64];
   for (int i = 0; i< nbDigit; i++) {
     if (bits64[i] != 0) {
 #ifdef WIN64
-      sprintf(bStr, "0x%016I64XULL", bits64[i]);
+      ::snprintf(bStr, sizeof(bStr), "0x%016I64XULL", bits64[i]);
 #else
-      sprintf(bStr, "0x%" PRIx64  "ULL", bits64[i]);
+      ::snprintf(bStr, sizeof(bStr), "0x%" PRIx64  "ULL", bits64[i]);
 #endif
     } else {
-      sprintf(bStr, "0ULL");
+      ::snprintf(bStr, sizeof(bStr), "0ULL");
     }
-    strcat(tmp, bStr);
-    if (i != nbDigit -1) strcat(tmp, ",");
+    tmp.append(bStr);
+    if (i != nbDigit -1) {
+      tmp.push_back(',');
+    }
   }
-  strcat(tmp,"}");
-  return std::string(tmp);
+  tmp.push_back('}');
+  return tmp;
 }
 
 // ------------------------------------------------
 
-void  Int::SetBaseN(int n,char *charset,char *value) {
+void  Int::SetBaseN(int n,const char *charset,const char *value) {
 
   CLEAR();
 
@@ -1290,7 +1292,7 @@ void  Int::SetBaseN(int n,char *charset,char *value) {
 
   int lgth = (int)strlen(value);
   for(int i=lgth-1;i>=0;i--) {
-    char *p = strchr(charset,toupper(value[i]));
+    const char *p = strchr(charset,toupper(value[i]));
     if(!p) {
       printf("Invalid charset !!\n");
       return;
@@ -1307,7 +1309,7 @@ void  Int::SetBaseN(int n,char *charset,char *value) {
 
 // ------------------------------------------------
 
-std::string Int::GetBaseN(int n,char *charset) {
+std::string Int::GetBaseN(int n,const char *charset) {
 
   std::string ret;
 
