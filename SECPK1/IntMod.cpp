@@ -130,6 +130,8 @@ int64_t INV256[] = {
 
 void Int::DivStep62(Int* u,Int* v,int64_t* eta,int* pos,int64_t* uu,int64_t* uv,int64_t* vu,int64_t* vv) {
 
+  (void)pos;
+
   // u' = (uu*u + uv*v) >> bitCount
   // v' = (vu*u + vv*v) >> bitCount
   // Do not maintain a matrix for r and s, the number of 
@@ -574,7 +576,6 @@ void Int::ModExp(Int *e) {
 
   Int base(this);
   SetInt32(1);
-  uint32_t i = 0;
 
   uint32_t nbBit = e->GetBitLength();
   for(int i=0;i<(int)nbBit;i++) {
@@ -654,8 +655,6 @@ void Int::ModSqrt() {
     ModExp(&e);
 
   } else if ((_P.bits64[0] & 3) == 1) {
-
-    int nbBit = _P.GetBitLength();
 
     // Tonelli Shanks
     uint64_t e=0;

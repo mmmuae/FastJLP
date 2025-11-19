@@ -183,14 +183,14 @@ private:
   void FetchWalks(uint64_t nbWalk,Int *x,Int *y,Int *d);
   void FetchWalks(uint64_t nbWalk,std::vector<int256_t>& kangs,Int* x,Int* y,Int* d);
   void FectchKangaroos(TH_PARAM *threads);
-  FILE *ReadHeader(std::string fileName,uint32_t *version,int type);
+  FILE *ReadHeader(std::string fileName,uint32_t *version,uint32_t type);
   bool  SaveHeader(std::string fileName,FILE* f,int type,uint64_t totalCount,double totalTime);
   int FSeek(FILE *stream,uint64_t pos);
   uint64_t FTell(FILE *stream);
   int IsDir(std::string dirName);
   bool IsEmpty(std::string fileName);
   static std::string GetPartName(std::string& partName,int i,bool tmpPart);
-  static FILE* OpenPart(std::string& partName,char* mode,int i,bool tmpPart=false);
+  static FILE* OpenPart(std::string& partName,const char* mode,int i,bool tmpPart=false);
   uint32_t CheckHash(uint32_t h,uint32_t nbItem,HashTable* hT,FILE* f);
 
 
