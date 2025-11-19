@@ -44,20 +44,46 @@ CUDA       = /usr/local/cuda
 CXXCUDA    = /usr/bin/g++
 NVCC       = $(CUDA)/bin/nvcc
 
+ifdef gpu
+ifndef ccap
+ccap != ./detect_cuda.sh
+AUTO_CCAP := 1
+endif
+endif
+
+ifdef gpu
+HIGH_SM := $(shell if [ $(ccap) -ge 90 ]; then echo 1; else echo 0; fi)
+NVCC_GENCODE = -gencode=arch=compute_$(ccap),code=sm_$(ccap)
+ifeq ($(HIGH_SM),1)
+NVCC_GENCODE += -gencode=arch=compute_$(ccap),code=compute_$(ccap)
+endif
+NVCC_HIGH_SM_FLAGS :=
+ifeq ($(HIGH_SM),1)
+NVCC_HIGH_SM_FLAGS += -Xptxas --allow-expensive-optimizations=true
+endif
+NVCC_COMMON_FLAGS = -maxrregcount=0 --ptxas-options=-v --compile --compiler-options -fPIC -ccbin $(CXXCUDA) -m64 -I$(CUDA)/include $(NVCC_GENCODE) $(NVCC_HIGH_SM_FLAGS)
+ifdef debug
+NVCC_BUILD_FLAGS = -G -g
+else
+NVCC_BUILD_FLAGS = -O2
+endif
+endif
+
 
 all: driverquery bsgs
 
 ifdef gpu
-ifndef ccap
+ifdef AUTO_CCAP
 driverquery:
-	. ./detect_cuda.sh
-ccap=$(shell cat cuda_version.txt)
+	@echo "Compiling against automatically detected CUDA compute capability sm_${ccap}"
 else
 driverquery:
-	@echo "Compiling against manually selected CUDA version ${ccap}"
+	@echo "Compiling against manually selected CUDA compute capability sm_${ccap}"
 endif
+	@echo "Build with 'make gpu=1' (or 'make bsgs gpu=1'); detect_cuda.sh is invoked automatically."
 else
 driverquery:
+	@true
 endif
 
 
@@ -84,13 +110,8 @@ endif
 #--------------------------------------------------------------------
 
 ifdef gpu
-ifdef debug
 $(OBJDIR)/GPU/GPUEngine.o: GPU/GPUEngine.cu
-	$(NVCC) -G -maxrregcount=0 --ptxas-options=-v --compile --compiler-options -fPIC -ccbin $(CXXCUDA) -m64 -g -I$(CUDA)/include -gencode=arch=compute_$(ccap),code=sm_$(ccap) -o $(OBJDIR)/GPU/GPUEngine.o -c GPU/GPUEngine.cu
-else
-$(OBJDIR)/GPU/GPUEngine.o: GPU/GPUEngine.cu
-	$(NVCC) -maxrregcount=0 --ptxas-options=-v --compile --compiler-options -fPIC -ccbin $(CXXCUDA) -m64 -O2 -I$(CUDA)/include -gencode=arch=compute_$(ccap),code=sm_$(ccap) -o $(OBJDIR)/GPU/GPUEngine.o -c GPU/GPUEngine.cu
-endif
+	$(NVCC) $(NVCC_COMMON_FLAGS) $(NVCC_BUILD_FLAGS) -o $(OBJDIR)/GPU/GPUEngine.o -c GPU/GPUEngine.cu
 endif
 
 $(OBJDIR)/%.o : %.cpp
@@ -109,7 +130,7 @@ $(OBJDIR)/GPU: $(OBJDIR)
 	cd $(OBJDIR) && mkdir -p GPU
 
 $(OBJDIR)/SECPK1: $(OBJDIR)
-	cd $(OBJDIR) &&	mkdir -p SECPK1
+	cd $(OBJDIR) && mkdir -p SECPK1
 
 clean:
 	@echo Cleaning...
@@ -117,6 +138,7 @@ clean:
 	@rm -f obj/GPU/*.o
 	@rm -f obj/SECPK1/*.o
 	@rm -f deviceQuery/*.o
+	@rm -f deviceQuery/deviceQuery
 	@rm -f cuda_version.txt
 	@rm -f deviceQuery/cuda_build_log.txt
 

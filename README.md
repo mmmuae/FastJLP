@@ -50,8 +50,14 @@ Kangaroo [-v] [-t nbThread] [-d dpBit] [gpu] [-check]
  -o fileName: output result to fileName
  -l: List cuda enabled devices
  -check: Check GPU kernel vs CPU
- inFile: intput configuration file
+inFile: intput configuration file
 ```
+
+## CUDA build quickstart
+
+1. Run `make gpu=1` (or `make bsgs gpu=1`) and let the default target build everything. The `driverquery` prerequisite runs automatically and calls `detect_cuda.sh`, so there is no manual probing step.
+2. If you just want to confirm which compute capability will be used, run `make driverquery gpu=1`. The output will tell you whether the value was auto-detected or overridden.
+3. To force a specific capability, append `ccap=<value>` to the command (for example `make gpu=1 ccap=120`). This bypasses detection but the rest of the build remains unchanged.
 
 ## Apple Silicon build (CMake + Ninja)
 
