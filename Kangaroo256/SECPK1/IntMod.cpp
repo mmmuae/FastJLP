@@ -16,7 +16,9 @@
 */
 
 #include "Int.h"
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386) || defined(_M_IX86)
 #include <emmintrin.h>
+#endif
 #include <string.h>
 
 #define MAX(x,y) (((x)>(y))?(x):(y))
@@ -187,7 +189,7 @@ void Int::DivStep62(Int* u,Int* v,int64_t* eta,int* pos,int64_t* uu,int64_t* uv,
 
 #endif
 
-#if 1
+#if defined(__SSE2__) || defined(_M_X64) || defined(_M_IX86)
 
   #define SWAP(tmp,x,y) tmp = x; x = y; y = tmp;
 
@@ -274,9 +276,7 @@ void Int::DivStep62(Int* u,Int* v,int64_t* eta,int* pos,int64_t* uu,int64_t* uv,
   *vv = ((int64_t *)&_v)[1];
 #endif
 
-#endif
-
-#if 0
+#else
 
   #define SWAP_NEG(tmp,x,y) tmp = x; x = y; y = -tmp;
 
