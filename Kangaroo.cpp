@@ -34,7 +34,7 @@ using namespace std;
 // ----------------------------------------------------------------------------
 
 Kangaroo::Kangaroo(Secp256K1 *secp,int32_t initDPSize,bool useGpu,string &workFile,string &iWorkFile,uint32_t savePeriod,bool saveKangaroo,bool saveKangarooByServer,
-                   double maxStep,int wtimeout,int port,int ntimeout,string serverIp,string outputFile,bool splitWorkfile) {
+                   double maxStep,int wtimeout,int port,int ntimeout,string serverIp,string outputFile,bool splitWorkfile,string &workTextFile,bool saveKangarooText) {
 
   this->secp = secp;
   this->initDPSize = initDPSize;
@@ -42,12 +42,14 @@ Kangaroo::Kangaroo(Secp256K1 *secp,int32_t initDPSize,bool useGpu,string &workFi
   this->offsetCount = 0;
   this->offsetTime = 0.0;
   this->workFile = workFile;
+  this->workTextFile = workTextFile;
   this->saveWorkPeriod = savePeriod;
   this->inputFile = iWorkFile;
   this->nbLoadedWalk = 0;
   this->clientMode = serverIp.length() > 0;
   this->saveKangarooByServer = this->clientMode && saveKangarooByServer;
   this->saveKangaroo = saveKangaroo || this->saveKangarooByServer;
+  this->saveKangarooText = saveKangarooText;
   this->fRead = NULL;
   this->maxStep = maxStep;
   this->wtimeout = wtimeout;

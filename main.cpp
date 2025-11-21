@@ -69,9 +69,11 @@ void printUsage() {
   printf(" -d: Specify number of leading zeros for the DP method (default is auto)\n");
   printf(" -t nbThread: Secify number of thread\n");
   printf(" -w workfile: Specify file to save work into (current processed key only)\n");
+  printf(" -wtxt workfile: Specify file to save work into (text format)\n");
   printf(" -i workfile: Specify file to load work from (current processed key only)\n");
   printf(" -wi workInterval: Periodic interval (in seconds) for saving work\n");
   printf(" -ws: Save kangaroos in the work file\n");
+  printf(" -wstxt: Save kangaroos in the text work file\n");
   printf(" -wss: Save kangaroos via the server\n");
   printf(" -wsplit: Split work file of server and reset hashtable\n");
   printf(" -wm file1 file2 destfile: Merge work file\n");
@@ -174,11 +176,13 @@ static bool gpuEnable = false;
 static vector<int> gpuId = { 0 };
 static vector<int> gridSize;
 static string workFile = "";
+static string workTextFile = "";
 static string checkWorkFile = "";
 static string iWorkFile = "";
 static uint32_t savePeriod = 60;
 static bool saveKangaroo = false;
 static bool saveKangarooByServer = false;
+static bool saveKangarooText = false;
 static string merge1 = "";
 static string merge2 = "";
 static string mergeDest = "";
@@ -246,6 +250,10 @@ int main(int argc, char* argv[]) {
       CHECKARG("-w",1);
       workFile = string(argv[a]);
       a++;
+    } else if(strcmp(argv[a],"-wtxt") == 0) {
+      CHECKARG("-wtxt",1);
+      workTextFile = string(argv[a]);
+      a++;
     } else if(strcmp(argv[a],"-i") == 0) {
       CHECKARG("-i",1);
       iWorkFile = string(argv[a]);
@@ -298,6 +306,9 @@ int main(int argc, char* argv[]) {
     } else if(strcmp(argv[a],"-ws") == 0) {
       a++;
       saveKangaroo = true;
+    } else if(strcmp(argv[a],"-wstxt") == 0) {
+      a++;
+      saveKangarooText = true;
     } else if(strcmp(argv[a],"-wss") == 0) {
       a++;
       saveKangarooByServer = true;
@@ -482,8 +493,13 @@ int main(int argc, char* argv[]) {
     exit(-1);
   }
 
+  if(saveKangarooText && workTextFile.empty()) {
+    printf("-wstxt requires -wtxt\n");
+    exit(-1);
+  }
+
   Kangaroo *v = new Kangaroo(secp,dp,gpuEnable,workFile,iWorkFile,savePeriod,saveKangaroo,saveKangarooByServer,
-                             maxStep,wtimeout,port,ntimeout,serverIP,outputFile,splitWorkFile);
+                             maxStep,wtimeout,port,ntimeout,serverIP,outputFile,splitWorkFile,workTextFile,saveKangarooText);
   if(checkFlag) {
     v->Check(gpuId,gridSize);  
     exit(0);

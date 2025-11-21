@@ -31,9 +31,11 @@ Kangaroo [-v] [-t nbThread] [-d dpBit] [gpu] [-check]
  -d: Specify number of leading zeros for the DP method (default is auto)
  -t nbThread: Secify number of thread
  -w workfile: Specify file to save work into (current processed key only)
+ -wtxt workfile: Specify file to save work into (text format)
  -i workfile: Specify file to load work from (current processed key only)
  -wi workInterval: Periodic interval (in seconds) for saving work
  -ws: Save kangaroos in the work file
+ -wstxt: Save kangaroos in the text work file
  -wss: Save kangaroos via the server
  -wsplit: Split work file of server and reset hashtable
  -wm file1 file2 destfile: Merge work file
