@@ -128,7 +128,7 @@ public:
 
   Kangaroo(Secp256K1 *secp,int32_t initDPSize,bool useGpu,std::string &workFile,std::string &iWorkFile,
            uint32_t savePeriod,bool saveKangaroo,bool saveKangarooByServer,double maxStep,int wtimeout,int sport,int ntimeout,
-           std::string serverIp,std::string outputFile,bool splitWorkfile);
+           std::string serverIp,std::string outputFile,bool splitWorkfile,std::string &workTextFile,bool saveKangarooText);
   void Run(int nbThread,std::vector<int> gpuId,std::vector<int> gridSize);
   void RunServer();
   bool ParseConfigFile(std::string &fileName);
@@ -185,6 +185,8 @@ private:
   void FectchKangaroos(TH_PARAM *threads);
   FILE *ReadHeader(std::string fileName,uint32_t *version,uint32_t type);
   bool  SaveHeader(std::string fileName,FILE* f,int type,uint64_t totalCount,double totalTime);
+  uint64_t SaveWorkTxt(const std::string &fileName,uint64_t totalCount,double totalTime,TH_PARAM *threads,int nbThread,
+                       uint64_t totalWalk,bool includeKangaroo);
   int FSeek(FILE *stream,uint64_t pos);
   uint64_t FTell(FILE *stream);
   int IsDir(std::string dirName);
@@ -271,11 +273,13 @@ private:
   double offsetTime;
   int64_t nbLoadedWalk;
   std::string workFile;
+  std::string workTextFile;
   std::string inputFile;
   int  saveWorkPeriod;
   bool saveRequest;
   bool saveKangaroo;
   bool saveKangarooByServer;
+  bool saveKangarooText;
   int wtimeout;
   int ntimeout;
   bool splitWorkfile;

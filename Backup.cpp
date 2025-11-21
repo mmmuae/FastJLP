@@ -19,6 +19,7 @@
 #include <fstream>
 #include "SECPK1/IntGroup.h"
 #include "Timer.h"
+#include <iomanip>
 #include <string.h>
 #define _USE_MATH_DEFINES
 #include <math.h>
@@ -405,6 +406,65 @@ void  Kangaroo::SaveWork(string fileName,FILE *f,int type,uint64_t totalCount,do
 
 }
 
+uint64_t Kangaroo::SaveWorkTxt(const std::string &fileName,uint64_t totalCount,double totalTime,TH_PARAM *threads,int nbThread,
+                       uint64_t totalWalk,bool includeKangaroo) {
+
+  ::printf("\nSaveWorkTxt: %s",fileName.c_str());
+
+  std::ofstream out(fileName);
+  if(!out.is_open()) {
+    ::printf("\nSaveWorkTxt: Cannot open %s for writing\n",fileName.c_str());
+    ::printf("%s\n",::strerror(errno));
+    return 0;
+  }
+
+  auto int256ToHex = [](const int256_t &v) {
+    Int tmp;
+    HashTable::toInt(const_cast<int256_t*>(&v), &tmp);
+    return tmp.GetBase16();
+  };
+
+  out << "VERSION 0\n";
+  out << "DP_BITS " << dpSize << "\n";
+  out << "START " << rangeStart.GetBase16() << "\n";
+  out << "STOP " << rangeEnd.GetBase16() << "\n";
+  out << "KEYX " << keysToSearch[keyIdx].x.GetBase16() << "\n";
+  out << "KEYY " << keysToSearch[keyIdx].y.GetBase16() << "\n";
+  out << "COUNT " << totalCount << "\n";
+  out << std::setprecision(17) << "TIME " << totalTime << "\n";
+  out << "HASH_SIZE " << HASH_SIZE << "\n";
+
+  for(uint32_t h = 0; h < HASH_SIZE; h++) {
+    out << "BUCKET " << h << ' ' << hashTable.E[h].nbItem << ' ' << hashTable.E[h].maxItem << "\n";
+    for(uint32_t i = 0; i < hashTable.E[h].nbItem; i++) {
+      ENTRY *item = hashTable.E[h].items[i];
+      out << "ITEM " << int256ToHex(item->x) << ' ' << int256ToHex(item->d) << ' ' << item->kType << "\n";
+    }
+  }
+
+  uint64_t kangarooCount = includeKangaroo ? totalWalk : 0;
+  out << "KANGAROOS " << kangarooCount << "\n";
+
+  if(includeKangaroo) {
+    for(int i = 0; i < nbThread; i++) {
+      for(uint64_t n = 0; n < threads[i].nbKangaroo; n++) {
+        out << "K "
+            << threads[i].px[n].GetBase16() << ' '
+            << threads[i].py[n].GetBase16() << ' '
+            << threads[i].distance[n].GetBase16() << "\n";
+      }
+    }
+  }
+
+  out.flush();
+  std::streampos pos = out.tellp();
+  if(pos < 0) {
+    return 0;
+  }
+  return static_cast<uint64_t>(pos);
+
+}
+
 void Kangaroo::SaveServerWork() {
 
   saveRequest = true;
@@ -448,7 +508,8 @@ void Kangaroo::SaveServerWork() {
 void Kangaroo::SaveWork(uint64_t totalCount,double totalTime,TH_PARAM *threads,int nbThread) {
 
   uint64_t totalWalk = 0;
-  uint64_t size;
+  uint64_t size = 0;
+  uint64_t textSize = 0;
 
   LOCK(saveMutex);
 
@@ -470,13 +531,31 @@ void Kangaroo::SaveWork(uint64_t totalCount,double totalTime,TH_PARAM *threads,i
     return;
   }
 
+  string ts;
+  if(splitWorkfile && (workFile.length() > 0 || workTextFile.length() > 0))
+    ts = "_" + Timer::getTS();
+
   string fileName = workFile;
-  if(splitWorkfile)
-    fileName = workFile + "_" + Timer::getTS();
+  if(fileName.length() > 0)
+    fileName += ts;
+
+  string textFileName = workTextFile;
+  if(textFileName.length() > 0)
+    textFileName += ts;
+
+  bool hasBinaryTarget = (!saveKangarooByServer) && (fileName.length() > 0);
+  bool needServerSend = clientMode && saveKangarooByServer;
+  bool hasTextTarget = textFileName.length() > 0;
+
+  uint64_t actualKangarooCount = 0;
+  if(saveKangaroo || saveKangarooText || saveKangarooByServer) {
+    for(int i = 0; i < nbThread; i++)
+      actualKangarooCount += threads[i].nbKangaroo;
+  }
 
   // Save
   FILE* f = NULL;
-  if(!saveKangarooByServer) {
+  if(hasBinaryTarget) {
     f = fopen(fileName.c_str(),"wb");
     if(f == NULL) {
       ::printf("\nSaveWork: Cannot open %s for writing\n",fileName.c_str());
@@ -488,75 +567,75 @@ void Kangaroo::SaveWork(uint64_t totalCount,double totalTime,TH_PARAM *threads,i
 
   if (clientMode) {
 
-    if(saveKangarooByServer) {
+    if(needServerSend) {
 
       ::printf("\nSaveWork (Kangaroo->Server): %s",fileName.c_str());
       vector<int256_t> kangs;
-      for(int i = 0; i < nbThread; i++)
-        totalWalk += threads[i].nbKangaroo;
-      kangs.reserve(totalWalk);
+      kangs.reserve(actualKangarooCount);
 
       for(int i = 0; i < nbThread; i++) {
         int256_t X;
         int256_t D;
         for(uint64_t n = 0; n < threads[i].nbKangaroo; n++) {
           HashTable::Convert(&threads[i].px[n],&threads[i].distance[n],&X,&D);
-	  kangs.push_back(D);
+          kangs.push_back(D);
         }
       }
       SendKangaroosToServer(fileName,kangs);
       size = kangs.size()*32 + 32;
-      goto end;
 
-    } else {
+    } else if(hasBinaryTarget) {
       SaveHeader(fileName,f,HEADK,totalCount,totalTime);
       ::printf("\nSaveWork (Kangaroo): %s",fileName.c_str());
     }
 
   } else {
 
-    SaveWork(fileName,f,HEADW,totalCount,totalTime);
+    if(hasBinaryTarget)
+      SaveWork(fileName,f,HEADW,totalCount,totalTime);
 
   }
 
 
-  if(saveKangaroo) {
+  if(hasBinaryTarget) {
 
-    // Save kangaroos
-    for(int i = 0; i < nbThread; i++)
-      totalWalk += threads[i].nbKangaroo;
+    totalWalk = saveKangaroo ? actualKangarooCount : 0;
     ::fwrite(&totalWalk,sizeof(uint64_t),1,f);
 
-    uint64_t point = totalWalk / 16;
-    uint64_t pointPrint = 0;
+    if(saveKangaroo) {
 
-    for(int i = 0; i < nbThread; i++) {
-      for(uint64_t n = 0; n < threads[i].nbKangaroo; n++) {
-        ::fwrite(&threads[i].px[n].bits64,32,1,f);
-        ::fwrite(&threads[i].py[n].bits64,32,1,f);
-        ::fwrite(&threads[i].distance[n].bits64,32,1,f);
-        pointPrint++;
-        if(pointPrint>point) {
-          ::printf(".");
-          pointPrint = 0;
+      uint64_t point = totalWalk / 16;
+      uint64_t pointPrint = 0;
+
+      for(int i = 0; i < nbThread; i++) {
+        for(uint64_t n = 0; n < threads[i].nbKangaroo; n++) {
+          ::fwrite(&threads[i].px[n].bits64,32,1,f);
+          ::fwrite(&threads[i].py[n].bits64,32,1,f);
+          ::fwrite(&threads[i].distance[n].bits64,32,1,f);
+          pointPrint++;
+          if(pointPrint>point) {
+            ::printf(".");
+            pointPrint = 0;
+          }
         }
       }
+
     }
 
-  } else {
-
-    ::fwrite(&totalWalk,sizeof(uint64_t),1,f);
+    size = FTell(f);
+    fclose(f);
 
   }
 
-  size = FTell(f);
-  fclose(f);
+  if(hasTextTarget) {
+    uint64_t textKangarooCount = saveKangarooText ? actualKangarooCount : 0;
+    textSize = SaveWorkTxt(textFileName,totalCount,totalTime,threads,nbThread,textKangarooCount,saveKangarooText);
+  }
 
-  if(splitWorkfile)
+  if(splitWorkfile && (hasBinaryTarget || hasTextTarget))
     hashTable.Reset();
 
   // Unblock threads
-end:
   saveRequest = false;
   UNLOCK(saveMutex);
 
@@ -565,7 +644,8 @@ end:
   char *ctimeBuff;
   time_t now = time(NULL);
   ctimeBuff = ctime(&now);
-  ::printf("done [%.1f MB] [%s] %s",(double)size/(1024.0*1024.0),GetTimeStr(t1 - t0).c_str(),ctimeBuff);
+  uint64_t reportedSize = (size > 0) ? size : textSize;
+  ::printf("done [%.1f MB] [%s] %s",(double)reportedSize/(1024.0*1024.0),GetTimeStr(t1 - t0).c_str(),ctimeBuff);
 
 }
 
