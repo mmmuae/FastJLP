@@ -66,6 +66,7 @@ Kangaroo::Kangaroo(Secp256K1 *secp,int32_t initDPSize,bool useGpu,string &workFi
   this->keyIdx = 0;
   this->splitWorkfile = splitWorkfile;
   this->pid = Timer::getPID();
+  this->asyncSaveRunning = false;
 
   CPU_GRP_SIZE = 1024;
 

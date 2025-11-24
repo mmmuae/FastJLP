@@ -24,6 +24,7 @@
 #define _USE_MATH_DEFINES
 #include <math.h>
 #include <algorithm>
+#include <utility>
 #ifndef WIN64
 #include <pthread.h>
 #include <sys/stat.h>
@@ -32,6 +33,45 @@
 
 using namespace std;
 
+struct HashEntrySnapshot {
+  int256_t x;
+  int256_t d;
+  uint32_t kType;
+};
+
+struct HashTableSnapshot {
+  std::vector<uint32_t> bucketSizes;
+  std::vector<uint32_t> bucketMax;
+  std::vector<uint64_t> bucketOffsets;
+  std::vector<HashEntrySnapshot> entries;
+};
+
+struct AsyncSavePayload {
+  HashTableSnapshot tableSnapshot;
+  std::vector<Int> kangarooX;
+  std::vector<Int> kangarooY;
+  std::vector<Int> kangarooD;
+  std::vector<int256_t> kangaroosForServer;
+  std::string rangeStartHex;
+  std::string rangeEndHex;
+  std::string keyXHex;
+  std::string keyYHex;
+  std::string fileName;
+  std::string textFileName;
+  bool hasBinaryTarget = false;
+  bool hasTextTarget = false;
+  bool needServerSend = false;
+  bool saveKangaroo = false;
+  bool saveKangarooText = false;
+  bool splitWorkfile = false;
+  uint64_t totalWalk = 0;
+  uint64_t textKangarooCount = 0;
+  uint32_t dpBits = 0;
+  uint64_t totalCount = 0;
+  double totalTime = 0.0;
+  double startTick = 0.0;
+  int headType = HEADW;
+};
 
 // ----------------------------------------------------------------------------
 
@@ -467,6 +507,8 @@ uint64_t Kangaroo::SaveWorkTxt(const std::string &fileName,uint64_t totalCount,d
 
 void Kangaroo::SaveServerWork() {
 
+  WaitForAsyncSave();
+
   saveRequest = true;
 
   double t0 = Timer::get_tick();
@@ -505,17 +547,167 @@ void Kangaroo::SaveServerWork() {
 
 }
 
-void Kangaroo::SaveWork(uint64_t totalCount,double totalTime,TH_PARAM *threads,int nbThread) {
+static void WriteHashTableSnapshot(FILE* f,const HashTableSnapshot& snapshot) {
+  for(uint32_t h = 0; h < HASH_SIZE; h++) {
+    fwrite(&snapshot.bucketSizes[h],sizeof(uint32_t),1,f);
+    fwrite(&snapshot.bucketMax[h],sizeof(uint32_t),1,f);
+    uint64_t offset = snapshot.bucketOffsets[h];
+    for(uint32_t i = 0; i < snapshot.bucketSizes[h]; i++) {
+      const auto &entry = snapshot.entries[offset + i];
+      fwrite(&(entry.x),32,1,f);
+      fwrite(&(entry.d),32,1,f);
+      fwrite(&(entry.kType),4,1,f);
+    }
+  }
+}
 
-  uint64_t totalWalk = 0;
+uint64_t Kangaroo::SaveWorkTxtSnapshot(AsyncSavePayload &payload) {
+
+  ::printf("\nSaveWorkTxt: %s",payload.textFileName.c_str());
+
+  std::ofstream out(payload.textFileName);
+  if(!out.is_open()) {
+    ::printf("\nSaveWorkTxt: Cannot open %s for writing\n",payload.textFileName.c_str());
+    ::printf("%s\n",::strerror(errno));
+    return 0;
+  }
+
+  auto int256ToHex = [](const int256_t &v) {
+    Int tmp;
+    HashTable::toInt(const_cast<int256_t*>(&v), &tmp);
+    return tmp.GetBase16();
+  };
+
+  out << "VERSION 0\n";
+  out << "DP_BITS " << payload.dpBits << "\n";
+  out << "START " << payload.rangeStartHex << "\n";
+  out << "STOP " << payload.rangeEndHex << "\n";
+  out << "KEYX " << payload.keyXHex << "\n";
+  out << "KEYY " << payload.keyYHex << "\n";
+  out << "COUNT " << payload.totalCount << "\n";
+  out << std::setprecision(17) << "TIME " << payload.totalTime << "\n";
+  out << "HASH_SIZE " << HASH_SIZE << "\n";
+
+  size_t entryIdx = 0;
+  for(uint32_t h = 0; h < HASH_SIZE; h++) {
+    out << "BUCKET " << h << ' ' << payload.tableSnapshot.bucketSizes[h] << ' ' << payload.tableSnapshot.bucketMax[h] << "\n";
+    entryIdx = payload.tableSnapshot.bucketOffsets[h];
+    for(uint32_t i = 0; i < payload.tableSnapshot.bucketSizes[h]; i++) {
+      const auto &item = payload.tableSnapshot.entries[entryIdx + i];
+      out << "ITEM " << int256ToHex(item.x) << ' ' << int256ToHex(item.d) << ' ' << item.kType << "\n";
+    }
+  }
+
+  uint64_t kangarooCount = payload.saveKangarooText ? payload.textKangarooCount : 0;
+  out << "KANGAROOS " << kangarooCount << "\n";
+
+  if(payload.saveKangarooText) {
+    for(size_t i = 0; i < payload.kangarooX.size(); i++) {
+      out << "K "
+          << payload.kangarooX[i].GetBase16() << ' '
+          << payload.kangarooY[i].GetBase16() << ' '
+          << payload.kangarooD[i].GetBase16() << "\n";
+    }
+  }
+
+  out.flush();
+  std::streampos pos = out.tellp();
+  if(pos < 0) {
+    return 0;
+  }
+  return static_cast<uint64_t>(pos);
+
+}
+
+void Kangaroo::WaitForAsyncSave() {
+  std::thread local;
+  {
+    std::lock_guard<std::mutex> guard(asyncSaveThreadMutex);
+    local = std::move(asyncSaveThread);
+  }
+  if(local.joinable()) {
+    local.join();
+  }
+  asyncSaveRunning = false;
+}
+
+void Kangaroo::RunAsyncSave(std::shared_ptr<AsyncSavePayload> payload) {
+
   uint64_t size = 0;
   uint64_t textSize = 0;
+
+  if(payload->needServerSend) {
+
+    ::printf("\nSaveWork (Kangaroo->Server): %s",payload->fileName.c_str());
+    SendKangaroosToServer(payload->fileName,payload->kangaroosForServer);
+    size = payload->kangaroosForServer.size() * 32 + 32;
+
+  } else if(payload->hasBinaryTarget) {
+
+    FILE* f = fopen(payload->fileName.c_str(),"wb");
+    if(f == NULL) {
+      ::printf("\nSaveWork: Cannot open %s for writing\n",payload->fileName.c_str());
+      ::printf("%s\n",::strerror(errno));
+    } else {
+      SaveHeader(payload->fileName,f,payload->headType,payload->totalCount,payload->totalTime);
+      ::printf("\nSaveWork: %s",payload->fileName.c_str());
+      WriteHashTableSnapshot(f,payload->tableSnapshot);
+
+      ::fwrite(&payload->totalWalk,sizeof(uint64_t),1,f);
+
+      if(payload->saveKangaroo) {
+        uint64_t point = payload->totalWalk / 16;
+        uint64_t pointPrint = 0;
+
+        for(size_t i = 0; i < payload->kangarooX.size(); i++) {
+          ::fwrite(&payload->kangarooX[i].bits64,32,1,f);
+          ::fwrite(&payload->kangarooY[i].bits64,32,1,f);
+          ::fwrite(&payload->kangarooD[i].bits64,32,1,f);
+          pointPrint++;
+          if(pointPrint>point) {
+            ::printf(".");
+            pointPrint = 0;
+          }
+        }
+      }
+
+      size = FTell(f);
+      fclose(f);
+    }
+
+  }
+
+  if(payload->hasTextTarget)
+    textSize = SaveWorkTxtSnapshot(*payload);
+
+  double t1 = Timer::get_tick();
+
+  char *ctimeBuff;
+  time_t now = time(NULL);
+  ctimeBuff = ctime(&now);
+  uint64_t reportedSize = (size > 0) ? size : textSize;
+  ::printf("done [%.1f MB] [%s] %s",(double)reportedSize/(1024.0*1024.0),GetTimeStr(t1 - payload->startTick).c_str(),ctimeBuff);
+
+  {
+    std::lock_guard<std::mutex> guard(asyncSaveThreadMutex);
+    asyncSaveRunning = false;
+  }
+
+}
+
+void Kangaroo::SaveWork(uint64_t totalCount,double totalTime,TH_PARAM *threads,int nbThread) {
+
+  if(asyncSaveRunning.load()) {
+    ::printf("\nSaveWork: async flush still running, skipping new snapshot\n");
+    return;
+  }
+
+  WaitForAsyncSave();
 
   LOCK(saveMutex);
 
   double t0 = Timer::get_tick();
 
-  // Wait that all threads blocks before saving works
   saveRequest = true;
   int timeout = wtimeout;
   while(!isWaiting(threads) && timeout>0) {
@@ -524,9 +716,9 @@ void Kangaroo::SaveWork(uint64_t totalCount,double totalTime,TH_PARAM *threads,i
   }
 
   if(timeout<=0) {
-    // Thread blocked or ended !
     if(!endOfSearch)
       ::printf("\nSaveWork timeout !\n");
+    saveRequest = false;
     UNLOCK(saveMutex);
     return;
   }
@@ -553,99 +745,88 @@ void Kangaroo::SaveWork(uint64_t totalCount,double totalTime,TH_PARAM *threads,i
       actualKangarooCount += threads[i].nbKangaroo;
   }
 
-  // Save
-  FILE* f = NULL;
-  if(hasBinaryTarget) {
-    f = fopen(fileName.c_str(),"wb");
-    if(f == NULL) {
-      ::printf("\nSaveWork: Cannot open %s for writing\n",fileName.c_str());
-      ::printf("%s\n",::strerror(errno));
-      UNLOCK(saveMutex);
-      return;
+  auto payload = std::make_shared<AsyncSavePayload>();
+  payload->fileName = fileName;
+  payload->textFileName = textFileName;
+  payload->hasBinaryTarget = hasBinaryTarget;
+  payload->needServerSend = needServerSend;
+  payload->hasTextTarget = hasTextTarget;
+  payload->saveKangaroo = saveKangaroo;
+  payload->saveKangarooText = saveKangarooText;
+  payload->splitWorkfile = splitWorkfile;
+  payload->totalWalk = saveKangaroo ? actualKangarooCount : 0;
+  payload->textKangarooCount = saveKangarooText ? actualKangarooCount : 0;
+  payload->dpBits = dpSize;
+  payload->rangeStartHex = rangeStart.GetBase16();
+  payload->rangeEndHex = rangeEnd.GetBase16();
+  payload->keyXHex = keysToSearch[keyIdx].x.GetBase16();
+  payload->keyYHex = keysToSearch[keyIdx].y.GetBase16();
+  payload->totalCount = totalCount;
+  payload->totalTime = totalTime;
+  payload->startTick = t0;
+  payload->headType = clientMode ? HEADK : HEADW;
+
+  payload->tableSnapshot.bucketSizes.resize(HASH_SIZE);
+  payload->tableSnapshot.bucketMax.resize(HASH_SIZE);
+  payload->tableSnapshot.bucketOffsets.resize(HASH_SIZE);
+  payload->tableSnapshot.entries.reserve(hashTable.GetNbItem());
+
+  uint64_t entryOffset = 0;
+  for(uint32_t h = 0; h < HASH_SIZE; h++) {
+    payload->tableSnapshot.bucketOffsets[h] = entryOffset;
+    payload->tableSnapshot.bucketSizes[h] = hashTable.E[h].nbItem;
+    payload->tableSnapshot.bucketMax[h] = hashTable.E[h].maxItem;
+    for(uint32_t i = 0; i < hashTable.E[h].nbItem; i++) {
+      HashEntrySnapshot snap;
+      snap.x = hashTable.E[h].items[i]->x;
+      snap.d = hashTable.E[h].items[i]->d;
+      snap.kType = hashTable.E[h].items[i]->kType;
+      payload->tableSnapshot.entries.push_back(snap);
     }
+    entryOffset += hashTable.E[h].nbItem;
   }
 
-  if (clientMode) {
+  if(saveKangaroo || saveKangarooText || saveKangarooByServer) {
+    payload->kangarooX.reserve(actualKangarooCount);
+    payload->kangarooY.reserve(actualKangarooCount);
+    payload->kangarooD.reserve(actualKangarooCount);
 
-    if(needServerSend) {
+    if(needServerSend)
+      payload->kangaroosForServer.reserve(actualKangarooCount);
 
-      ::printf("\nSaveWork (Kangaroo->Server): %s",fileName.c_str());
-      vector<int256_t> kangs;
-      kangs.reserve(actualKangarooCount);
+    for(int i = 0; i < nbThread; i++) {
+      for(uint64_t n = 0; n < threads[i].nbKangaroo; n++) {
+        payload->kangarooX.push_back(threads[i].px[n]);
+        payload->kangarooY.push_back(threads[i].py[n]);
+        payload->kangarooD.push_back(threads[i].distance[n]);
 
-      for(int i = 0; i < nbThread; i++) {
-        int256_t X;
-        int256_t D;
-        for(uint64_t n = 0; n < threads[i].nbKangaroo; n++) {
+        if(needServerSend) {
+          int256_t X;
+          int256_t D;
           HashTable::Convert(&threads[i].px[n],&threads[i].distance[n],&X,&D);
-          kangs.push_back(D);
+          payload->kangaroosForServer.push_back(D);
         }
       }
-      SendKangaroosToServer(fileName,kangs);
-      size = kangs.size()*32 + 32;
-
-    } else if(hasBinaryTarget) {
-      SaveHeader(fileName,f,HEADK,totalCount,totalTime);
-      ::printf("\nSaveWork (Kangaroo): %s",fileName.c_str());
     }
-
-  } else {
-
-    if(hasBinaryTarget)
-      SaveWork(fileName,f,HEADW,totalCount,totalTime);
-
   }
 
-
-  if(hasBinaryTarget) {
-
-    totalWalk = saveKangaroo ? actualKangarooCount : 0;
-    ::fwrite(&totalWalk,sizeof(uint64_t),1,f);
-
-    if(saveKangaroo) {
-
-      uint64_t point = totalWalk / 16;
-      uint64_t pointPrint = 0;
-
-      for(int i = 0; i < nbThread; i++) {
-        for(uint64_t n = 0; n < threads[i].nbKangaroo; n++) {
-          ::fwrite(&threads[i].px[n].bits64,32,1,f);
-          ::fwrite(&threads[i].py[n].bits64,32,1,f);
-          ::fwrite(&threads[i].distance[n].bits64,32,1,f);
-          pointPrint++;
-          if(pointPrint>point) {
-            ::printf(".");
-            pointPrint = 0;
-          }
-        }
-      }
-
-    }
-
-    size = FTell(f);
-    fclose(f);
-
-  }
-
-  if(hasTextTarget) {
-    uint64_t textKangarooCount = saveKangarooText ? actualKangarooCount : 0;
-    textSize = SaveWorkTxt(textFileName,totalCount,totalTime,threads,nbThread,textKangarooCount,saveKangarooText);
-  }
+  saveRequest = false;
 
   if(splitWorkfile && (hasBinaryTarget || hasTextTarget))
     hashTable.Reset();
 
-  // Unblock threads
-  saveRequest = false;
   UNLOCK(saveMutex);
 
-  double t1 = Timer::get_tick();
+  if(!hasBinaryTarget && !hasTextTarget && !needServerSend)
+    return;
 
-  char *ctimeBuff;
-  time_t now = time(NULL);
-  ctimeBuff = ctime(&now);
-  uint64_t reportedSize = (size > 0) ? size : textSize;
-  ::printf("done [%.1f MB] [%s] %s",(double)reportedSize/(1024.0*1024.0),GetTimeStr(t1 - t0).c_str(),ctimeBuff);
+  ::printf("\nSaveWork: captured snapshot for async flush\n");
+
+  {
+    std::lock_guard<std::mutex> guard(asyncSaveThreadMutex);
+    asyncSaveRunning = true;
+    asyncSaveThread = std::thread(&Kangaroo::RunAsyncSave,this,payload);
+  }
 
 }
 

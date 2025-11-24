@@ -328,7 +328,11 @@ void Kangaroo::Process(TH_PARAM *params,std::string unit) {
     // Save request
     if((workFile.length() > 0 || workTextFile.length() > 0) && !endOfSearch) {
       if((t1 - lastSave) > saveWorkPeriod) {
-        SaveWork(count + offsetCount,t1 - startTime + offsetTime,params,nbCPUThread + nbGPUThread);
+        if(asyncSaveRunning.load()) {
+          ::printf("\nSaveWork: previous async save still in progress, skipping interval\n");
+        } else {
+          SaveWork(count + offsetCount,t1 - startTime + offsetTime,params,nbCPUThread + nbGPUThread);
+        }
         lastSave = t1;
       }
     }
@@ -361,6 +365,8 @@ void Kangaroo::Process(TH_PARAM *params,std::string unit) {
       GetTimeStr(t1 - startTime).c_str()
       );
   }
+
+  WaitForAsyncSave();
 
 }
 

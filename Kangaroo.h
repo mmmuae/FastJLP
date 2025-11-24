@@ -36,7 +36,11 @@ typedef int SOCKET;
 #include <signal.h>
 #endif
 
+#include <atomic>
+#include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 #include "SECPK1/SECP256k1.h"
 #include "HashTable.h"
@@ -54,6 +58,7 @@ typedef pthread_t THREAD_HANDLE;
 #endif
 
 class Kangaroo;
+struct AsyncSavePayload;
 
 // Input thread parameters
 typedef struct {
@@ -187,6 +192,7 @@ private:
   bool  SaveHeader(std::string fileName,FILE* f,int type,uint64_t totalCount,double totalTime);
   uint64_t SaveWorkTxt(const std::string &fileName,uint64_t totalCount,double totalTime,TH_PARAM *threads,int nbThread,
                        uint64_t totalWalk,bool includeKangaroo);
+  uint64_t SaveWorkTxtSnapshot(AsyncSavePayload &payload);
   int FSeek(FILE *stream,uint64_t pos);
   uint64_t FTell(FILE *stream);
   int IsDir(std::string dirName);
@@ -222,6 +228,8 @@ private:
   void JoinThreads(THREAD_HANDLE *handles, int nbThread);
   void FreeHandles(THREAD_HANDLE *handles, int nbThread);
   void Process(TH_PARAM *params,std::string unit);
+  void WaitForAsyncSave();
+  void RunAsyncSave(std::shared_ptr<AsyncSavePayload> payload);
 
   uint64_t getCPUCount();
   uint64_t getGPUCount();
@@ -235,6 +243,10 @@ private:
   int  nbCPUThread;
   int  nbGPUThread;
   double startTime;
+
+  std::mutex asyncSaveThreadMutex;
+  std::thread asyncSaveThread;
+  std::atomic<bool> asyncSaveRunning;
 
   // Range
   int rangePower;
