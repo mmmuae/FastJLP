@@ -709,18 +709,8 @@ void Kangaroo::SaveWork(uint64_t totalCount,double totalTime,TH_PARAM *threads,i
   double t0 = Timer::get_tick();
 
   saveRequest = true;
-  int timeout = wtimeout;
-  while(!isWaiting(threads) && timeout>0) {
-    Timer::SleepMillis(50);
-    timeout -= 50;
-  }
-
-  if(timeout<=0) {
-    if(!endOfSearch)
-      ::printf("\nSaveWork timeout !\n");
-    saveRequest = false;
-    UNLOCK(saveMutex);
-    return;
+  while(!isWaiting(threads) && isAlive(threads) && !endOfSearch) {
+    Timer::SleepMillis(10);
   }
 
   string ts;
