@@ -362,5 +362,7 @@ void Kangaroo::Process(TH_PARAM *params,std::string unit) {
       );
   }
 
+  WaitForAsyncSave();
+
 }
 
