@@ -697,6 +697,11 @@ void Kangaroo::RunAsyncSave(std::shared_ptr<AsyncSavePayload> payload) {
 
 void Kangaroo::SaveWork(uint64_t totalCount,double totalTime,TH_PARAM *threads,int nbThread) {
 
+  if(asyncSaveRunning.load()) {
+    ::printf("\nSaveWork: async flush still running, skipping new snapshot\n");
+    return;
+  }
+
   WaitForAsyncSave();
 
   LOCK(saveMutex);
