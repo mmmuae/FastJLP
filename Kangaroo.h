@@ -157,6 +157,7 @@ public:
   bool CheckPartition(TH_PARAM* p);
   bool CheckWorkFile(TH_PARAM* p);
   void ProcessServer();
+  void ScanGapsThread(TH_PARAM *p);
 
   void AddConnectedClient();
   void RemoveConnectedClient();
@@ -261,6 +262,11 @@ private:
   uint32_t dpSize;
   int32_t initDPSize;
   uint64_t collisionInSameHerd;
+  uint64_t tameCount;
+  uint64_t wildCount;
+  int256_t lastGap;
+  int256_t minGap;
+  int256_t lowestGap;
   std::vector<Point> keysToSearch;
   Point keyToSearch;
   Point keyToSearchNeg;
