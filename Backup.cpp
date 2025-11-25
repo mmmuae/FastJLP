@@ -417,7 +417,7 @@ bool Kangaroo::SaveHeader(string fileName,FILE* f,int type,uint64_t totalCount,d
   }
   ::fwrite(&version,sizeof(uint32_t),1,f);
 
-  if(type==HEADW) {
+  if((uint32_t)type==HEADW) {
 
     // Save global param
     ::fwrite(&dpSize,sizeof(uint32_t),1,f);
