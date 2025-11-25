@@ -65,6 +65,7 @@ Kangaroo::Kangaroo(Secp256K1 *secp,int32_t initDPSize,bool useGpu,string &workFi
   this->collisionInSameHerd = 0;
   this->tameCount = 0;
   this->wildCount = 0;
+  // Initialize lastGap to 0 (all 256 bits)
   this->lastGap.i32[0] = 0;
   this->lastGap.i32[1] = 0;
   this->lastGap.i32[2] = 0;
@@ -73,22 +74,27 @@ Kangaroo::Kangaroo(Secp256K1 *secp,int32_t initDPSize,bool useGpu,string &workFi
   this->lastGap.i32[5] = 0;
   this->lastGap.i32[6] = 0;
   this->lastGap.i32[7] = 0;
+  // Initialize minGap and lowestGap to max 128-bit value (matching Kangaroo3's int128_t)
+  // Lower 64 bits: 0xFFFFFFFFFFFFFFFF = i32[1:0]
   this->minGap.i32[0] = 0xFFFFFFFFU;
   this->minGap.i32[1] = 0xFFFFFFFFU;
+  // Upper 64 bits: 0x3FFFFFFFFFFFFFFF = i32[3:2]
   this->minGap.i32[2] = 0xFFFFFFFFU;
-  this->minGap.i32[3] = 0xFFFFFFFFU;
-  this->minGap.i32[4] = 0xFFFFFFFFU;
-  this->minGap.i32[5] = 0xFFFFFFFFU;
-  this->minGap.i32[6] = 0xFFFFFFFFU;
-  this->minGap.i32[7] = 0x3FFFFFFFU;
+  this->minGap.i32[3] = 0x3FFFFFFFU;
+  // Upper 128 bits unused (set to 0)
+  this->minGap.i32[4] = 0;
+  this->minGap.i32[5] = 0;
+  this->minGap.i32[6] = 0;
+  this->minGap.i32[7] = 0;
+  // Same for lowestGap
   this->lowestGap.i32[0] = 0xFFFFFFFFU;
   this->lowestGap.i32[1] = 0xFFFFFFFFU;
   this->lowestGap.i32[2] = 0xFFFFFFFFU;
-  this->lowestGap.i32[3] = 0xFFFFFFFFU;
-  this->lowestGap.i32[4] = 0xFFFFFFFFU;
-  this->lowestGap.i32[5] = 0xFFFFFFFFU;
-  this->lowestGap.i32[6] = 0xFFFFFFFFU;
-  this->lowestGap.i32[7] = 0x3FFFFFFFU;
+  this->lowestGap.i32[3] = 0x3FFFFFFFU;
+  this->lowestGap.i32[4] = 0;
+  this->lowestGap.i32[5] = 0;
+  this->lowestGap.i32[6] = 0;
+  this->lowestGap.i32[7] = 0;
   this->keyIdx = 0;
   this->splitWorkfile = splitWorkfile;
   this->pid = Timer::getPID();
@@ -1093,6 +1099,7 @@ void Kangaroo::Run(int nbThread,std::vector<int> gpuId,std::vector<int> gridSize
       collisionInSameHerd = 0;
       tameCount = 0;
       wildCount = 0;
+      // Reset lastGap to 0
       lastGap.i32[0] = 0;
       lastGap.i32[1] = 0;
       lastGap.i32[2] = 0;
@@ -1101,22 +1108,23 @@ void Kangaroo::Run(int nbThread,std::vector<int> gpuId,std::vector<int> gridSize
       lastGap.i32[5] = 0;
       lastGap.i32[6] = 0;
       lastGap.i32[7] = 0;
+      // Reset minGap and lowestGap to max 128-bit value (matching Kangaroo3)
       minGap.i32[0] = 0xFFFFFFFFU;
       minGap.i32[1] = 0xFFFFFFFFU;
       minGap.i32[2] = 0xFFFFFFFFU;
-      minGap.i32[3] = 0xFFFFFFFFU;
-      minGap.i32[4] = 0xFFFFFFFFU;
-      minGap.i32[5] = 0xFFFFFFFFU;
-      minGap.i32[6] = 0xFFFFFFFFU;
-      minGap.i32[7] = 0x3FFFFFFFU;
+      minGap.i32[3] = 0x3FFFFFFFU;
+      minGap.i32[4] = 0;
+      minGap.i32[5] = 0;
+      minGap.i32[6] = 0;
+      minGap.i32[7] = 0;
       lowestGap.i32[0] = 0xFFFFFFFFU;
       lowestGap.i32[1] = 0xFFFFFFFFU;
       lowestGap.i32[2] = 0xFFFFFFFFU;
-      lowestGap.i32[3] = 0xFFFFFFFFU;
-      lowestGap.i32[4] = 0xFFFFFFFFU;
-      lowestGap.i32[5] = 0xFFFFFFFFU;
-      lowestGap.i32[6] = 0xFFFFFFFFU;
-      lowestGap.i32[7] = 0x3FFFFFFFU;
+      lowestGap.i32[3] = 0x3FFFFFFFU;
+      lowestGap.i32[4] = 0;
+      lowestGap.i32[5] = 0;
+      lowestGap.i32[6] = 0;
+      lowestGap.i32[7] = 0;
 
       // Reset conters
       memset(counters,0,sizeof(counters));
