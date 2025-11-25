@@ -414,6 +414,7 @@ void Kangaroo::ScanGapsThread(TH_PARAM *p) {
 
   // Background thread for periodic gap tracking
   // This runs independently and doesn't affect the critical path
+  (void)p; // Unused parameter
 
 #ifndef WIN64
   setvbuf(stdout, NULL, _IONBF, 0);

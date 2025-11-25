@@ -9,6 +9,7 @@ x64/
 obj/
 .idea/
 kangaroo
+kangaroo-256
 cmake-build-debug/
 *.prf
 
