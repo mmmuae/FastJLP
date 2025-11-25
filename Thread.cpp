@@ -213,16 +213,34 @@ void Kangaroo::ProcessServer() {
 
     t1 = Timer::get_tick();
 
-    if(!endOfSearch)
-      printf("\r[Client %d][Kang 2^%.2f][DP Count 2^%.2f/2^%.2f][Dead %.0f][%s][%s]  ",
+    if(!endOfSearch) {
+      // Calculate T/W ratio
+      double twRatio = (wildCount > 0) ? ((double)tameCount / (double)wildCount) : 0.0;
+
+      // Calculate compact gap values - convert 256-bit to double and divide by billions
+      double gap256 = 0.0;
+      double lowestGap256 = 0.0;
+      double multiplier = 1.0;
+      for(int k = 0; k < 8; k++) {
+        gap256 += (double)lastGap.i32[k] * multiplier;
+        lowestGap256 += (double)lowestGap.i32[k] * multiplier;
+        multiplier *= 4294967296.0; // 2^32
+      }
+      double currentGap = gap256 / 1000000000.0;
+      double lowest = lowestGap256 / 1000000000.0;
+
+      printf("\r[Client %d][Kang 2^%.2f][DP Count 2^%.2f/2^%.2f][Dead %.0f][T/W:%.3f][Gap:%.1f][L.Gap:%.1f][%s][%s]  ",
         connectedClient,
         log2((double)totalRW),
         log2((double)hashTable.GetNbItem()),
         log2(expectedNbOp / pow(2.0,dpSize)),
         (double)collisionInSameHerd,
+        twRatio,
+        currentGap, lowest,
         GetTimeStr(t1 - startTime).c_str(),
         hashTable.GetSizeInfo().c_str()
         );
+    }
 
     if(workFile.length() > 0 && !endOfSearch) {
       if((t1 - lastSave) > saveWorkPeriod) {
@@ -304,20 +322,40 @@ void Kangaroo::Process(TH_PARAM *params,std::string unit) {
 
     // Display stats
     if(isAlive(params) && !endOfSearch) {
+      // Calculate T/W ratio
+      double twRatio = (wildCount > 0) ? ((double)tameCount / (double)wildCount) : 0.0;
+
+      // Calculate compact gap values - convert 256-bit to double and divide by billions
+      // Convert to double: sum of (i32[k] * 2^(32*k)) for k=0..7, then divide by 1e9
+      double gap256 = 0.0;
+      double lowestGap256 = 0.0;
+      double multiplier = 1.0;
+      for(int k = 0; k < 8; k++) {
+        gap256 += (double)lastGap.i32[k] * multiplier;
+        lowestGap256 += (double)lowestGap.i32[k] * multiplier;
+        multiplier *= 4294967296.0; // 2^32
+      }
+      double currentGap = gap256 / 1000000000.0;
+      double lowest = lowestGap256 / 1000000000.0;
+
       if(clientMode) {
-        printf("\r[%.2f %s][GPU %.2f %s][Count 2^%.2f][%s][Server %6s]  ",
+        printf("\r[%.2f %s][GPU %.2f %s][Count 2^%.2f][T/W:%.3f][Gap:%.1f][L.Gap:%.1f][%s][Server %6s]  ",
           avgKeyRate / 1000000.0,unit.c_str(),
           avgGpuKeyRate / 1000000.0,unit.c_str(),
           log2((double)count + offsetCount),
+          twRatio,
+          currentGap, lowest,
           GetTimeStr(t1 - startTime + offsetTime).c_str(),
           serverStatus.c_str()
           );
       } else {
-        printf("\r[%.2f %s][GPU %.2f %s][Count 2^%.2f][Dead %.0f][%s (Avg %s)][%s]  ",
+        printf("\r[%.2f %s][GPU %.2f %s][Count 2^%.2f][Dead %.0f][T/W:%.3f][Gap:%.1f][L.Gap:%.1f][%s (Avg %s)][%s]  ",
           avgKeyRate / 1000000.0,unit.c_str(),
           avgGpuKeyRate / 1000000.0,unit.c_str(),
           log2((double)count + offsetCount),
           (double)collisionInSameHerd,
+          twRatio,
+          currentGap, lowest,
           GetTimeStr(t1 - startTime + offsetTime).c_str(),GetTimeStr(expectedTime).c_str(),
           hashTable.GetSizeInfo().c_str()
         );
@@ -367,6 +405,157 @@ void Kangaroo::Process(TH_PARAM *params,std::string unit) {
   }
 
   WaitForAsyncSave();
+
+}
+
+// ----------------------------------------------------------------------------
+
+void Kangaroo::ScanGapsThread(TH_PARAM *p) {
+
+  // Background thread for periodic gap tracking
+  // This runs independently and doesn't affect the critical path
+
+#ifndef WIN64
+  setvbuf(stdout, NULL, _IONBF, 0);
+#endif
+
+  while(!endOfSearch) {
+
+    // Sleep for 3 seconds between scans
+    int delay = 3000;
+    while(!endOfSearch && delay > 0) {
+      Timer::SleepMillis(50);
+      delay -= 50;
+    }
+
+    if(endOfSearch) break;
+
+    // Scan hash table for gaps
+    int256_t localMinGap;
+    localMinGap.i32[0] = 0xFFFFFFFFU;
+    localMinGap.i32[1] = 0xFFFFFFFFU;
+    localMinGap.i32[2] = 0xFFFFFFFFU;
+    localMinGap.i32[3] = 0xFFFFFFFFU;
+    localMinGap.i32[4] = 0xFFFFFFFFU;
+    localMinGap.i32[5] = 0xFFFFFFFFU;
+    localMinGap.i32[6] = 0xFFFFFFFFU;
+    localMinGap.i32[7] = 0x3FFFFFFFU;
+
+    int256_t localLastGap = lastGap;
+    bool gapFound = false;
+
+    std::vector<int256_t> distances;
+    std::vector<uint32_t> herdTypes;
+
+    // Scan through all hash buckets
+    for(uint32_t h = 0; h < HASH_SIZE && !endOfSearch; h++) {
+
+      distances.clear();
+      herdTypes.clear();
+
+      LOCK(ghMutex);
+      uint32_t nbItem = hashTable.E[h].nbItem;
+
+      if(nbItem > 1) {
+        distances.reserve(nbItem);
+        herdTypes.reserve(nbItem);
+
+        for(uint32_t i = 0; i < nbItem; i++) {
+          ENTRY* entry = hashTable.E[h].items[i];
+          uint32_t type = (entry->d.i32[7] & 0x40000000U) != 0;
+          int256_t dist = entry->d;
+          dist.i32[7] &= 0x3FFFFFFFU;
+
+          distances.push_back(dist);
+          herdTypes.push_back(type);
+        }
+      }
+      UNLOCK(ghMutex);
+
+      uint32_t nbStored = (uint32_t)distances.size();
+      if(nbStored > 1 && !endOfSearch) {
+        for(uint32_t i = 0; i < nbStored - 1 && !endOfSearch; i++) {
+          for(uint32_t j = i + 1; j < nbStored && !endOfSearch; j++) {
+            if(herdTypes[i] != herdTypes[j]) {
+              // Calculate absolute difference
+              int256_t gap;
+              bool iGreater = false;
+
+              // Compare distances[i] > distances[j]
+              for(int k = 7; k >= 0; k--) {
+                if(distances[i].i32[k] > distances[j].i32[k]) {
+                  iGreater = true;
+                  break;
+                } else if(distances[i].i32[k] < distances[j].i32[k]) {
+                  break;
+                }
+              }
+
+              if(iGreater) {
+                // gap = distances[i] - distances[j]
+                uint64_t borrow = 0;
+                for(int k = 0; k < 8; k++) {
+                  uint64_t diff = (uint64_t)distances[i].i32[k] - (uint64_t)distances[j].i32[k] - borrow;
+                  gap.i32[k] = (uint32_t)diff;
+                  borrow = (diff >> 32) & 1;
+                }
+              } else {
+                // gap = distances[j] - distances[i]
+                uint64_t borrow = 0;
+                for(int k = 0; k < 8; k++) {
+                  uint64_t diff = (uint64_t)distances[j].i32[k] - (uint64_t)distances[i].i32[k] - borrow;
+                  gap.i32[k] = (uint32_t)diff;
+                  borrow = (diff >> 32) & 1;
+                }
+              }
+
+              gapFound = true;
+              localLastGap = gap;
+
+              // Update local minimum - compare gap < localMinGap
+              bool gapIsSmaller = false;
+              for(int k = 7; k >= 0; k--) {
+                if(gap.i32[k] < localMinGap.i32[k]) {
+                  gapIsSmaller = true;
+                  break;
+                } else if(gap.i32[k] > localMinGap.i32[k]) {
+                  break;
+                }
+              }
+
+              if(gapIsSmaller) {
+                localMinGap = gap;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Update global minimum gap, lowest gap, and last seen gap
+    if(gapFound) {
+      LOCK(ghMutex);
+      lastGap = localLastGap;
+      minGap = localMinGap;
+
+      // Update lowestGap only if this is a new all-time minimum
+      bool isNewLowest = false;
+      for(int k = 7; k >= 0; k--) {
+        if(localMinGap.i32[k] < lowestGap.i32[k]) {
+          isNewLowest = true;
+          break;
+        } else if(localMinGap.i32[k] > lowestGap.i32[k]) {
+          break;
+        }
+      }
+
+      if(isNewLowest) {
+        lowestGap = localMinGap;
+      }
+      UNLOCK(ghMutex);
+    }
+
+  }
 
 }
 

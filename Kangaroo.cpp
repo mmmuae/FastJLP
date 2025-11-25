@@ -63,6 +63,32 @@ Kangaroo::Kangaroo(Secp256K1 *secp,int32_t initDPSize,bool useGpu,string &workFi
   this->connectedClient = 0;
   this->totalRW = 0;
   this->collisionInSameHerd = 0;
+  this->tameCount = 0;
+  this->wildCount = 0;
+  this->lastGap.i32[0] = 0;
+  this->lastGap.i32[1] = 0;
+  this->lastGap.i32[2] = 0;
+  this->lastGap.i32[3] = 0;
+  this->lastGap.i32[4] = 0;
+  this->lastGap.i32[5] = 0;
+  this->lastGap.i32[6] = 0;
+  this->lastGap.i32[7] = 0;
+  this->minGap.i32[0] = 0xFFFFFFFFU;
+  this->minGap.i32[1] = 0xFFFFFFFFU;
+  this->minGap.i32[2] = 0xFFFFFFFFU;
+  this->minGap.i32[3] = 0xFFFFFFFFU;
+  this->minGap.i32[4] = 0xFFFFFFFFU;
+  this->minGap.i32[5] = 0xFFFFFFFFU;
+  this->minGap.i32[6] = 0xFFFFFFFFU;
+  this->minGap.i32[7] = 0x3FFFFFFFU;
+  this->lowestGap.i32[0] = 0xFFFFFFFFU;
+  this->lowestGap.i32[1] = 0xFFFFFFFFU;
+  this->lowestGap.i32[2] = 0xFFFFFFFFU;
+  this->lowestGap.i32[3] = 0xFFFFFFFFU;
+  this->lowestGap.i32[4] = 0xFFFFFFFFU;
+  this->lowestGap.i32[5] = 0xFFFFFFFFU;
+  this->lowestGap.i32[6] = 0xFFFFFFFFU;
+  this->lowestGap.i32[7] = 0x3FFFFFFFU;
   this->keyIdx = 0;
   this->splitWorkfile = splitWorkfile;
   this->pid = Timer::getPID();
@@ -320,6 +346,15 @@ bool Kangaroo::AddToTable(Int *pos,Int *dist,uint32_t kType) {
   if(addStatus== ADD_COLLISION)
     return CollisionCheck(&hashTable.kDist,hashTable.kType,dist,kType);
 
+  // Track tame/wild DP counts
+  if(addStatus == ADD_OK) {
+    if(kType == 0) {
+      tameCount++;
+    } else {
+      wildCount++;
+    }
+  }
+
   return addStatus == ADD_OK;
 
 }
@@ -333,6 +368,15 @@ bool Kangaroo::AddToTable(int256_t *x,int256_t *d, uint32_t kType) {
     HashTable::toInt(d,&dist);
     return CollisionCheck(&hashTable.kDist,hashTable.kType,&dist,kType);
 
+  }
+
+  // Track tame/wild DP counts
+  if(addStatus == ADD_OK) {
+    if(kType == 0) {
+      tameCount++;
+    } else {
+      wildCount++;
+    }
   }
 
   return addStatus == ADD_OK;
@@ -674,6 +718,16 @@ void *_SolveKeyGPU(void *lpParam) {
 #endif
   TH_PARAM *p = (TH_PARAM *)lpParam;
   p->obj->SolveKeyGPU(p);
+  return 0;
+}
+
+#ifdef WIN64
+DWORD WINAPI _ScanGapsThread(LPVOID lpParam) {
+#else
+void *_ScanGapsThread(void *lpParam) {
+#endif
+  TH_PARAM *p = (TH_PARAM *)lpParam;
+  p->obj->ScanGapsThread(p);
   return 0;
 }
 
@@ -1037,6 +1091,32 @@ void Kangaroo::Run(int nbThread,std::vector<int> gpuId,std::vector<int> gridSize
 
       endOfSearch = false;
       collisionInSameHerd = 0;
+      tameCount = 0;
+      wildCount = 0;
+      lastGap.i32[0] = 0;
+      lastGap.i32[1] = 0;
+      lastGap.i32[2] = 0;
+      lastGap.i32[3] = 0;
+      lastGap.i32[4] = 0;
+      lastGap.i32[5] = 0;
+      lastGap.i32[6] = 0;
+      lastGap.i32[7] = 0;
+      minGap.i32[0] = 0xFFFFFFFFU;
+      minGap.i32[1] = 0xFFFFFFFFU;
+      minGap.i32[2] = 0xFFFFFFFFU;
+      minGap.i32[3] = 0xFFFFFFFFU;
+      minGap.i32[4] = 0xFFFFFFFFU;
+      minGap.i32[5] = 0xFFFFFFFFU;
+      minGap.i32[6] = 0xFFFFFFFFU;
+      minGap.i32[7] = 0x3FFFFFFFU;
+      lowestGap.i32[0] = 0xFFFFFFFFU;
+      lowestGap.i32[1] = 0xFFFFFFFFU;
+      lowestGap.i32[2] = 0xFFFFFFFFU;
+      lowestGap.i32[3] = 0xFFFFFFFFU;
+      lowestGap.i32[4] = 0xFFFFFFFFU;
+      lowestGap.i32[5] = 0xFFFFFFFFU;
+      lowestGap.i32[6] = 0xFFFFFFFFU;
+      lowestGap.i32[7] = 0x3FFFFFFFU;
 
       // Reset conters
       memset(counters,0,sizeof(counters));
@@ -1061,11 +1141,16 @@ void Kangaroo::Run(int nbThread,std::vector<int> gpuId,std::vector<int> gridSize
 
 #endif
 
+      // Launch gap scan thread
+      int gapThreadId = nbCPUThread + nbGPUThread;
+      params[gapThreadId].threadId = 0xFF;
+      params[gapThreadId].isRunning = true;
+      thHandles[gapThreadId] = LaunchThread(_ScanGapsThread,params + gapThreadId);
 
       // Wait for end
       Process(params,"MK/s");
-      JoinThreads(thHandles,nbCPUThread + nbGPUThread);
-      FreeHandles(thHandles,nbCPUThread + nbGPUThread);
+      JoinThreads(thHandles,nbCPUThread + nbGPUThread + 1);
+      FreeHandles(thHandles,nbCPUThread + nbGPUThread + 1);
       hashTable.Reset();
 
 #ifdef STATS
