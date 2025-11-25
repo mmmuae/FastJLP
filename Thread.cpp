@@ -217,17 +217,19 @@ void Kangaroo::ProcessServer() {
       // Calculate T/W ratio
       double twRatio = (wildCount > 0) ? ((double)tameCount / (double)wildCount) : 0.0;
 
-      // Calculate compact gap values - convert 256-bit to double and divide by billions
-      double gap256 = 0.0;
-      double lowestGap256 = 0.0;
-      double multiplier = 1.0;
-      for(int k = 0; k < 8; k++) {
-        gap256 += (double)lastGap.i32[k] * multiplier;
-        lowestGap256 += (double)lowestGap.i32[k] * multiplier;
-        multiplier *= 4294967296.0; // 2^32
-      }
-      double currentGap = gap256 / 1000000000.0;
-      double lowest = lowestGap256 / 1000000000.0;
+      // Calculate compact gap values - convert 128-bit to double and divide by billions
+      // FastJLP uses int256_t but we only need lower 128 bits (like Kangaroo3's int128_t)
+      // i32[0-1] = low 64 bits (i64[0]), i32[2-3] = high 64 bits (i64[1])
+      double lastGap_low64 = (double)lastGap.i32[0] + (double)lastGap.i32[1] * 4294967296.0;
+      double lastGap_high64 = (double)lastGap.i32[2] + (double)lastGap.i32[3] * 4294967296.0;
+      double gap128 = lastGap_high64 * 18446744073709551616.0 + lastGap_low64;
+
+      double lowestGap_low64 = (double)lowestGap.i32[0] + (double)lowestGap.i32[1] * 4294967296.0;
+      double lowestGap_high64 = (double)lowestGap.i32[2] + (double)lowestGap.i32[3] * 4294967296.0;
+      double lowestGap128 = lowestGap_high64 * 18446744073709551616.0 + lowestGap_low64;
+
+      double currentGap = gap128 / 1000000000.0;
+      double lowest = lowestGap128 / 1000000000.0;
 
       printf("\r[Client %d][Kang 2^%.2f][DP Count 2^%.2f/2^%.2f][Dead %.0f][T/W:%.3f][Gap:%.1f][L.Gap:%.1f][%s][%s]  ",
         connectedClient,
@@ -325,18 +327,19 @@ void Kangaroo::Process(TH_PARAM *params,std::string unit) {
       // Calculate T/W ratio
       double twRatio = (wildCount > 0) ? ((double)tameCount / (double)wildCount) : 0.0;
 
-      // Calculate compact gap values - convert 256-bit to double and divide by billions
-      // Convert to double: sum of (i32[k] * 2^(32*k)) for k=0..7, then divide by 1e9
-      double gap256 = 0.0;
-      double lowestGap256 = 0.0;
-      double multiplier = 1.0;
-      for(int k = 0; k < 8; k++) {
-        gap256 += (double)lastGap.i32[k] * multiplier;
-        lowestGap256 += (double)lowestGap.i32[k] * multiplier;
-        multiplier *= 4294967296.0; // 2^32
-      }
-      double currentGap = gap256 / 1000000000.0;
-      double lowest = lowestGap256 / 1000000000.0;
+      // Calculate compact gap values - convert 128-bit to double and divide by billions
+      // FastJLP uses int256_t but we only need lower 128 bits (like Kangaroo3's int128_t)
+      // i32[0-1] = low 64 bits (i64[0]), i32[2-3] = high 64 bits (i64[1])
+      double lastGap_low64 = (double)lastGap.i32[0] + (double)lastGap.i32[1] * 4294967296.0;
+      double lastGap_high64 = (double)lastGap.i32[2] + (double)lastGap.i32[3] * 4294967296.0;
+      double gap128 = lastGap_high64 * 18446744073709551616.0 + lastGap_low64;
+
+      double lowestGap_low64 = (double)lowestGap.i32[0] + (double)lowestGap.i32[1] * 4294967296.0;
+      double lowestGap_high64 = (double)lowestGap.i32[2] + (double)lowestGap.i32[3] * 4294967296.0;
+      double lowestGap128 = lowestGap_high64 * 18446744073709551616.0 + lowestGap_low64;
+
+      double currentGap = gap128 / 1000000000.0;
+      double lowest = lowestGap128 / 1000000000.0;
 
       if(clientMode) {
         printf("\r[%.2f %s][GPU %.2f %s][Count 2^%.2f][T/W:%.3f][Gap:%.1f][L.Gap:%.1f][%s][Server %6s]  ",
@@ -433,14 +436,16 @@ void Kangaroo::ScanGapsThread(TH_PARAM *p) {
 
     // Scan hash table for gaps
     int256_t localMinGap;
+    // Initialize to max 128-bit value (matching global minGap initialization)
     localMinGap.i32[0] = 0xFFFFFFFFU;
     localMinGap.i32[1] = 0xFFFFFFFFU;
     localMinGap.i32[2] = 0xFFFFFFFFU;
-    localMinGap.i32[3] = 0xFFFFFFFFU;
-    localMinGap.i32[4] = 0xFFFFFFFFU;
-    localMinGap.i32[5] = 0xFFFFFFFFU;
-    localMinGap.i32[6] = 0xFFFFFFFFU;
-    localMinGap.i32[7] = 0x3FFFFFFFU;
+    localMinGap.i32[3] = 0x3FFFFFFFU;
+    // Upper 128 bits set to 0
+    localMinGap.i32[4] = 0;
+    localMinGap.i32[5] = 0;
+    localMinGap.i32[6] = 0;
+    localMinGap.i32[7] = 0;
 
     int256_t localLastGap = lastGap;
     bool gapFound = false;
