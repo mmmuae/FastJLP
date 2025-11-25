@@ -436,14 +436,16 @@ void Kangaroo::ScanGapsThread(TH_PARAM *p) {
 
     // Scan hash table for gaps
     int256_t localMinGap;
+    // Initialize to max 128-bit value (matching global minGap initialization)
     localMinGap.i32[0] = 0xFFFFFFFFU;
     localMinGap.i32[1] = 0xFFFFFFFFU;
     localMinGap.i32[2] = 0xFFFFFFFFU;
-    localMinGap.i32[3] = 0xFFFFFFFFU;
-    localMinGap.i32[4] = 0xFFFFFFFFU;
-    localMinGap.i32[5] = 0xFFFFFFFFU;
-    localMinGap.i32[6] = 0xFFFFFFFFU;
-    localMinGap.i32[7] = 0x3FFFFFFFU;
+    localMinGap.i32[3] = 0x3FFFFFFFU;
+    // Upper 128 bits set to 0
+    localMinGap.i32[4] = 0;
+    localMinGap.i32[5] = 0;
+    localMinGap.i32[6] = 0;
+    localMinGap.i32[7] = 0;
 
     int256_t localLastGap = lastGap;
     bool gapFound = false;
